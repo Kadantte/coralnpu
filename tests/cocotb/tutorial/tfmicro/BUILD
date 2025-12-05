@@ -55,7 +55,7 @@ generate_cc_arrays(
 
 # BEGIN_TESTCASES_FOR_running_tflite
 RUN_MOBILENET_TEST = [
-    "run_mobilenet",
+    "core_mini_rvv_mobilenet_v1",
 ]
 # END_TESTCASES_FOR_running_tflite
 
@@ -68,7 +68,7 @@ cocotb_test_suite(
     testcases = RUN_MOBILENET_TEST,
     testcases_vname = "RUN_MOBILENET_TEST",
     tests_kwargs = {
-        "waves": True,
+        "waves": False,
         "tags" : ["manual"],
         "hdl_toplevel": "RvvCoreMiniHighmemAxi",
         "seed": "42",

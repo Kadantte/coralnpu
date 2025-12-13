@@ -65,11 +65,7 @@ class Lsu(p: Parameters) extends Module {
 
 object Lsu {
   def apply(p: Parameters): Lsu = {
-    if (p.useLsuV2) {
-      return Module(new LsuV2(p))
-    } else {
-      return Module(new LsuV1(p))
-    }
+    return Module(new LsuV2(p))
   }
 }
 
@@ -123,7 +119,7 @@ object LsuOp extends ChiselEnum {
     val halfAligned = (address(0) === 0.U)
     val wordAligned = (address(1, 0) === 0.U)
 
-    val size = MuxCase(16.U, Seq(
+    val size = MuxUpTo1H(16.U, Seq(
       op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.SB) -> 1.U,
       op.isOneOf(LsuOp.LH, LsuOp.LHU, LsuOp.SH) -> Mux(halfAligned, 2.U, 16.U),
       op.isOneOf(LsuOp.LW, LsuOp.SW, LsuOp.FLOAT) ->
@@ -134,7 +130,7 @@ object LsuOp extends ChiselEnum {
     val halfAlignedAddress = address(31, 1) << 1.U
     val wordAlignedAddress = address(31, 2) << 2.U
     val lineAlignedAddress = address(31, 4) << 4.U
-    val alignedAddress = MuxCase(lineAlignedAddress, Seq(
+    val alignedAddress = MuxUpTo1H(lineAlignedAddress, Seq(
       op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.SB) -> address,
       (op.isOneOf(LsuOp.LH, LsuOp.LHU, LsuOp.SH) && halfAligned) ->
           halfAlignedAddress,
@@ -228,7 +224,7 @@ object LsuUOp {
       val lmul = rvvState.get.bits.lmul
       // TODO(davidgao): Add checks for illegal LMUL values in the frontend.
       // Unit-stride, const-stride. Default value applies when eew == sew.
-      val emul_data = MuxCase(lmul, Seq(
+      val emul_data = MuxUpTo1H(lmul, Seq(
           // eew == 1/4 sew
           (eew === "b000".U && sew === "b010".U) -> (lmul - 2.U),
           // eew == 1/2 sew
@@ -246,7 +242,7 @@ object LsuUOp {
           cmd.isMaskOperation() -> 0.U,
           // Section 7.9 of RVV Spec: "The nf field encodes how many vector
           // registers to load and store".
-          cmd.isWholeRegister() -> MuxCase(0.U, Seq(
+          cmd.isWholeRegister() -> MuxUpTo1H(0.U, Seq(
               (cmd.nfields.get === 0.U) -> 0.U,  // NF1 -> LMUL1
               (cmd.nfields.get === 1.U) -> 1.U,  // NF2 -> LMUL2
               (cmd.nfields.get === 3.U) -> 2.U,  // NF4 -> LMUL4
@@ -257,7 +253,7 @@ object LsuUOp {
       ))
 
       // If mask operation, force fields to zero
-      result.nfields.get := MuxCase(cmd.nfields.get, Seq(
+      result.nfields.get := MuxUpTo1H(cmd.nfields.get, Seq(
           cmd.isMaskOperation() -> 0.U,
           cmd.isWholeRegister() -> 0.U,
       ))
@@ -273,7 +269,7 @@ object ComputeStridedAddrs {
             baseAddr: UInt,
             stride: UInt,
             elemWidth: UInt): Vec[UInt] = {
-    MuxCase(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
+    MuxUpTo1H(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
       // elemWidth validation is done at decode time.
       // TODO: pass this as an enum.
       (elemWidth === "b000".U) -> VecInit((0 until bytesPerSlot).map(
@@ -296,7 +292,7 @@ object ComputeIndexedAddrs {
     val indices16 = UIntToVec(indices, 16).map(x => Cat(0.U(16.W), x))
     val indices32 = UIntToVec(indices, 32)
 
-    val indices_v = MuxCase(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
+    val indices_v = MuxUpTo1H(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
       // 8-bit indices.
       (indexWidth === "b000".U) -> VecInit(indices8),
       // 16-bit indices.
@@ -306,7 +302,7 @@ object ComputeIndexedAddrs {
           indices32 ++ indices32 ++ indices32 ++ indices32),
     ))
 
-    MuxCase(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
+    MuxUpTo1H(VecInit.fill(bytesPerSlot)(0.U(32.W)), Seq(
       // elemWidth validation is done at decode time.
       // 8-bit data. Each byte has its own offset.
       (sew === "b000".U) -> VecInit((0 until bytesPerSlot).map(
@@ -366,9 +362,9 @@ class LsuVectorLoop extends Bundle {
 }
 
 // bytesPerSlot is the number of bytes in a vector register
-// bytesPerLine is the number of bytes in the AXI bus
-class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
-  val elemBits = log2Ceil(bytesPerLine)
+// p.lsuDataBytes is the number of bytes in the AXI bus
+class LsuSlot(p: Parameters, bytesPerSlot: Int) extends Bundle {
+  val elemBits = log2Ceil(p.lsuDataBytes)
 
   val op = LsuOp()
   val rd = UInt(5.W)
@@ -423,7 +419,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
   }
 
   def vectorUpdate(updated: Bool, rvv2lsu: Rvv2Lsu): LsuSlot = {
-    val result = Wire(new LsuSlot(bytesPerSlot, bytesPerLine))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := op
     result.rd := rd
     result.store := store
@@ -436,7 +432,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
 
     val segmentBaseAddr = baseAddr + (segmentStride * vectorLoop.segment.curr)(31, 0)
     val bitsPerSlot = bytesPerSlot * 8
-    val indices = MuxCase(rvv2lsu.idx.bits.data, Seq(
+    val indices = MuxUpTo1H(rvv2lsu.idx.bits.data, Seq(
         // 2 of 2
         ((vectorLoop.indexParition.curr === 1.U) && (vectorLoop.indexParition.max === 1.U)) -> (rvv2lsu.idx.bits.data(bitsPerSlot - 1, bitsPerSlot / 2)),
         // 2 of 4
@@ -446,7 +442,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
         // 4 of 4
         ((vectorLoop.indexParition.curr === 3.U) && (vectorLoop.indexParition.max === 3.U)) -> (rvv2lsu.idx.bits.data(bitsPerSlot - 1, bitsPerSlot * 3 / 4)),
     ))
-    result.addrs := MuxCase(addrs, Seq(
+    result.addrs := MuxUpTo1H(addrs, Seq(
         op.isOneOf(LsuOp.VLOAD_UNIT, LsuOp.VSTORE_UNIT) ->
             ComputeStridedAddrs(bytesPerSlot, segmentBaseAddr, elemStride, elemWidth),
         op.isOneOf(LsuOp.VLOAD_STRIDED, LsuOp.VSTORE_STRIDED) ->
@@ -488,7 +484,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
     val lineDataVec = UIntToVec(lineData, 8)
     val gatheredData = Gather(elemAddresses(), lineDataVec)
 
-    val result = Wire(new LsuSlot(bytesPerSlot, bytesPerLine))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := op
     result.rd := rd
     result.store := store
@@ -518,7 +514,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
 
   // Updates the slot if its result is written back to the regfile.
   def writebackUpdate(writeback: Bool): LsuSlot = {
-    val result = Wire(new LsuSlot(bytesPerSlot, bytesPerLine))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := op
     result.store := store
     result.pc := pc
@@ -550,7 +546,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
       op.isOneOf(LsuOp.VLOAD_UNIT, LsuOp.VSTORE_UNIT) ->
           (baseAddr + (vectorLoop.segment.max * 16.U) + 16.U),
       op.isOneOf(LsuOp.VLOAD_STRIDED, LsuOp.VSTORE_STRIDED) ->
-          MuxCase(baseAddr + (elemStride * bytesPerSlot.U), Seq(
+          MuxUpTo1H(baseAddr + (elemStride * bytesPerSlot.U), Seq(
             (elemWidth === "b000".U) ->
                 (baseAddr + (elemStride * bytesPerSlot.U)),
             (elemWidth === "b101".U) ->
@@ -577,7 +573,7 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
 
   def storeUpdate(selected: Vec[Bool]): LsuSlot = {
     assert(selected.length == active.length)
-    val result = Wire(new LsuSlot(bytesPerSlot, bytesPerLine))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := op
     result.rd := rd
     result.store := store
@@ -605,13 +601,13 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
     halfSigned := half.asSInt
     val byteSigned = Wire(SInt(32.W))
     byteSigned := byte.asSInt
-    MuxCase(0.U, Seq(
-      (op === LsuOp.LB) -> byteSigned.asUInt,
-      (op === LsuOp.LBU) -> byte,
-      (op === LsuOp.LH) -> halfSigned.asUInt,
-      (op === LsuOp.LHU) -> half,
-      (op === LsuOp.LW) -> word,
-      (op === LsuOp.FLOAT) -> word,
+    MuxLookup(op, 0.U)(Seq(
+      LsuOp.LB -> byteSigned.asUInt,
+      LsuOp.LBU -> byte,
+      LsuOp.LH -> halfSigned.asUInt,
+      LsuOp.LHU -> half,
+      LsuOp.LW -> word,
+      LsuOp.FLOAT -> word,
     ))
   }
 
@@ -628,11 +624,11 @@ class LsuSlot(bytesPerSlot: Int, bytesPerLine: Int) extends Bundle {
 
 object LsuSlot {
   def inactive(p: Parameters, bytesPerSlot: Int): LsuSlot = {
-    0.U.asTypeOf(new LsuSlot(bytesPerSlot, p.lsuDataBytes))
+    0.U.asTypeOf(new LsuSlot(p, bytesPerSlot))
   }
 
   def fromLsuUOp(uop: LsuUOp, p: Parameters, bytesPerSlot: Int): LsuSlot = {
-    val result = Wire(new LsuSlot(bytesPerSlot, p.lsuDataBytes))
+    val result = Wire(new LsuSlot(p, bytesPerSlot))
     result.op := uop.op
     result.rd := uop.rd
     result.store := uop.store
@@ -648,7 +644,7 @@ object LsuSlot {
       // indexed loads. This occurs when the index dtype is greater than data
       // dtype.
       val elemWidth = uop.elemWidth.get
-      val elemMultiplier = MuxCase(1.U, Seq(
+      val elemMultiplier = MuxUpTo1H(1.U, Seq(
         // 8-bit data, 16-bit indices
         ((elemWidth === "b101".U) && (uop.sew.get === 0.U)) -> 2.U,
         // 8-bit data, 32-bit indices
@@ -656,13 +652,13 @@ object LsuSlot {
         // 16-bit data, 32-bit indices
         ((elemWidth === "b110".U) && (uop.sew.get === 1.U)) -> 2.U,
       ))
-      val max_subvector = MuxCase(0.U, Seq(
+      val max_subvector = MuxUpTo1H(0.U, Seq(
         ((elemMultiplier === 2.U) && (uop.emul_data.get.asSInt >= 0.S)) -> 1.U,
         ((elemMultiplier === 4.U) && (uop.emul_data.get.asSInt >= 0.S)) -> 3.U,
         ((elemMultiplier === 4.U) && (uop.emul_data.get.asSInt === -1.S)) -> 1.U,
       ))
       // [0..x] data vecs we can operate on with one index vec
-      val indexParitions = MuxCase(0.U, Seq(
+      val indexParitions = MuxUpTo1H(0.U, Seq(
         // 16-bit data, 8-bit indices
         ((elemWidth === "b000".U) && (uop.sew.get === 1.U)) -> 1.U,
         // 32-bit data, 8-bit indices
@@ -681,6 +677,8 @@ object LsuSlot {
           _.rd -> uop.rd,
           _.indexParition -> LoopingCounter(indexParitions),
       )
+    } else {
+      result.vectorLoop := 0.U.asTypeOf(result.vectorLoop)
     }
 
     // All vector ops require writeback. Lsu needs to inform RVV core store uop
@@ -688,7 +686,7 @@ object LsuSlot {
     result.pendingWriteback := !uop.store || LsuOp.isVector(uop.op)
     result.pendingVector := LsuOp.isVector(uop.op)
 
-    val active = MuxCase(0.U(bytesPerSlot.W), Seq(
+    val active = MuxUpTo1H(0.U(bytesPerSlot.W), Seq(
       uop.op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.SB) -> "b1".U(bytesPerSlot.W),
       uop.op.isOneOf(LsuOp.LH, LsuOp.LHU, LsuOp.SH) -> "b11".U(bytesPerSlot.W),
       uop.op.isOneOf(LsuOp.LW, LsuOp.SW, LsuOp.FLOAT) -> "b1111".U(bytesPerSlot.W),
@@ -710,23 +708,23 @@ object LsuSlot {
         uop.op.isOneOf(LsuOp.VLOAD_OINDEXED, LsuOp.VLOAD_UINDEXED,
                        LsuOp.VSTORE_OINDEXED, LsuOp.VSTORE_UINDEXED),
         // Indexed load. The unit stride also controls segment stride.
-        MuxCase(1.U, Seq(
+        MuxUpTo1H(1.U, Seq(
             (result.sew === "b000".U) -> 1.U,  // 1-byte elements
             (result.sew === "b001".U) -> 2.U,  // 2-byte elements
             (result.sew === "b010".U) -> 4.U,  // 4-byte elements
         )),
         // Non-indexed load.
-        MuxCase(1.U, Seq(
-            (uop.elemWidth.get === "b000".U) -> 1.U,  // 1-byte elements
-            (uop.elemWidth.get === "b101".U) -> 2.U,  // 2-byte elements
-            (uop.elemWidth.get === "b110".U) -> 4.U,  // 4-byte elements
+        MuxUpTo1H(1.U, Seq(
+            (uop.elemWidth.getOrElse(3.U) === "b000".U) -> 1.U,  // 1-byte elements
+            (uop.elemWidth.getOrElse(3.U) === "b101".U) -> 2.U,  // 2-byte elements
+            (uop.elemWidth.getOrElse(3.U) === "b110".U) -> 4.U,  // 4-byte elements
         )),
     )
 
     result.segmentStride := unitStride
     result.elemStride := Mux(
         uop.op.isOneOf(LsuOp.VLOAD_UNIT, LsuOp.VSTORE_UNIT),
-        unitStride + (uop.nfields.get * unitStride),
+        unitStride + (uop.nfields.getOrElse(3.U) * unitStride),
         uop.data)
 
     result.data(0) := uop.data(7, 0)
@@ -811,322 +809,6 @@ object FlushCmd {
     result.pcNext := cmd.pc + 4.U
     result
   }
-}
-
-class LsuV1(p: Parameters) extends Lsu(p) {
-  // AXI Queues.
-  val n = 9
-  val ctrl = FifoX(new LsuCtrl(p), p.instructionLanes * 2, n)
-  val data = Slice(new LsuReadData(p), true, true)
-
-  // Match and mask.
-  io.active :=
-    (ctrl.io.count =/= 0.U || data.io.count =/= 0.U)
-  val ctrlready = (1 to p.instructionLanes).reverse.map(x => ctrl.io.count <= (n - (2 * x)).U)
-
-  for (i <- 0 until p.instructionLanes) {
-    io.req(i).ready := ctrlready(i) && data.io.in.ready
-  }
-
-  // Address phase must use simple logic to resolve mask for unaligned address.
-  val linebit = log2Ceil(p.lsuDataBits / 8)
-  val lineoffset = (p.lsuDataBits / 8)
-
-  // ---------------------------------------------------------------------------
-  // Control Port Inputs.
-  ctrl.io.in.valid := io.req.map(_.valid).reduce(_||_)
-
-  for (i <- 0 until p.instructionLanes) {
-    val itcm = p.m.filter(_.memType == MemoryRegionType.IMEM)
-                  .map(_.contains(io.busPort.addr(i))).reduceOption(_ || _).getOrElse(false.B)
-    val dtcm = p.m.filter(_.memType == MemoryRegionType.DMEM)
-                  .map(_.contains(io.busPort.addr(i))).reduceOption(_ || _).getOrElse(true.B)
-    val peri = p.m.filter(_.memType == MemoryRegionType.Peripheral)
-                  .map(_.contains(io.busPort.addr(i))).reduceOption(_ || _).getOrElse(false.B)
-    assert(PopCount(Cat(itcm | dtcm | peri)) <= 1.U)
-
-    val opstore = io.req(i).bits.op.isOneOf(LsuOp.SW, LsuOp.SH, LsuOp.SB)
-    val opiload = io.req(i).bits.op.isOneOf(LsuOp.LW, LsuOp.LH, LsuOp.LB, LsuOp.LHU, LsuOp.LBU)
-    val opload  = opiload || (io.req(i).bits.op === LsuOp.FLOAT && !io.req(i).bits.store)
-    val opfencei   = (io.req(i).bits.op === LsuOp.FENCEI)
-    val opflushat  = (io.req(i).bits.op === LsuOp.FLUSHAT)
-    val opflushall = (io.req(i).bits.op === LsuOp.FLUSHALL)
-    val opsldst = (opstore || opload) && (io.req(i).bits.op =/= LsuOp.FLOAT)
-    val opvldst = (io.req(i).bits.op === LsuOp.VLDST)
-    val opsext = io.req(i).bits.op.isOneOf(LsuOp.LB, LsuOp.LH)
-    val opsize = Cat(io.req(i).bits.op.isOneOf(LsuOp.LW, LsuOp.SW, LsuOp.FLOAT),
-                     io.req(i).bits.op.isOneOf(LsuOp.LH, LsuOp.LHU, LsuOp.SH),
-                     io.req(i).bits.op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.SB))
-    val opfldst = (io.req(i).bits.op === LsuOp.FLOAT)
-
-    val regionType = MuxCase(MemoryRegionType.External, Seq(
-      dtcm -> MemoryRegionType.DMEM,
-      itcm -> MemoryRegionType.IMEM,
-      peri -> MemoryRegionType.Peripheral,
-    ))
-    val crossLineBoundary =
-      (Mod2(io.busPort.addr(i), p.lsuDataBytes.U) + opsize > p.lsuDataBytes.U)
-    val twoLines = crossLineBoundary && (dtcm || itcm)
-    val belowLineBoundary = (p.lsuDataBytes.U - Mod2(io.busPort.addr(i), p.lsuDataBytes.U))(2,0)
-    val txnSizes = Mux(twoLines, VecInit(belowLineBoundary, (opsize - belowLineBoundary)), VecInit(opsize, 0.U))
-    val (mask0, mask1) = GenerateMasks(p.lsuDataBytes, io.busPort.addr(i), txnSizes)
-
-    ctrl.io.in.bits(i * 2 + 1).valid := io.req(i).valid && ctrlready(i)
-    ctrl.io.in.bits(i * 2 + 1).bits.pc := io.req(i).bits.pc
-    ctrl.io.in.bits(i * 2 + 1).bits.addr := io.busPort.addr(i)
-    ctrl.io.in.bits(i * 2 + 1).bits.adrx := io.busPort.addr(i) + lineoffset.U
-    ctrl.io.in.bits(i * 2 + 1).bits.data := (if (p.enableFloat) {
-      Mux(opfldst, io.busPort_flt.get.data(i), io.busPort.data(i))
-    } else {
-      io.busPort.data(i)
-    })
-    ctrl.io.in.bits(i * 2 + 1).bits.index := io.req(i).bits.addr
-    ctrl.io.in.bits(i * 2 + 1).bits.sext := opsext
-    ctrl.io.in.bits(i * 2 + 1).bits.size := txnSizes(0)
-    ctrl.io.in.bits(i * 2 + 1).bits.fullsize := opsize
-    ctrl.io.in.bits(i * 2 + 1).bits.iload := opiload
-    ctrl.io.in.bits(i * 2 + 1).bits.fencei   := opfencei
-    ctrl.io.in.bits(i * 2 + 1).bits.flushat  := opflushat
-    ctrl.io.in.bits(i * 2 + 1).bits.flushall := opflushall
-    ctrl.io.in.bits(i * 2 + 1).bits.sldst := opsldst
-    ctrl.io.in.bits(i * 2 + 1).bits.vldst := opvldst
-    ctrl.io.in.bits(i * 2 + 1).bits.fldst := opfldst
-    ctrl.io.in.bits(i * 2 + 1).bits.write := !opload
-    ctrl.io.in.bits(i * 2 + 1).bits.regionType := regionType
-    ctrl.io.in.bits(i * 2 + 1).bits.mask := mask0
-    ctrl.io.in.bits(i * 2 + 1).bits.last := true.B
-
-    ctrl.io.in.bits(i * 2).valid := io.req(i).valid && ctrlready(i) && twoLines
-    ctrl.io.in.bits(i * 2).bits.pc := io.req(i).bits.pc
-    ctrl.io.in.bits(i * 2).bits.addr := Cat(io.busPort.addr(i)(31,linebit) + 1.U, 0.U(linebit.W))
-    ctrl.io.in.bits(i * 2).bits.adrx := Cat(io.busPort.addr(i)(31,linebit) + 1.U, 0.U(linebit.W)) + lineoffset.U
-    ctrl.io.in.bits(i * 2).bits.data := (if (p.enableFloat) {
-      Mux(opfldst, io.busPort_flt.get.data(i), io.busPort.data(i))
-    } else {
-      io.busPort.data(i)
-    }).rotateRight(txnSizes(0) * 8.U)
-    ctrl.io.in.bits(i * 2).bits.index := io.req(i).bits.addr
-    ctrl.io.in.bits(i * 2).bits.sext := opsext
-    ctrl.io.in.bits(i * 2).bits.size := txnSizes(1)
-    ctrl.io.in.bits(i * 2).bits.fullsize := opsize
-    ctrl.io.in.bits(i * 2).bits.iload := opiload
-    ctrl.io.in.bits(i * 2).bits.fencei   := opfencei
-    ctrl.io.in.bits(i * 2).bits.flushat  := opflushat
-    ctrl.io.in.bits(i * 2).bits.flushall := opflushall
-    ctrl.io.in.bits(i * 2).bits.sldst := opsldst
-    ctrl.io.in.bits(i * 2).bits.vldst := opvldst
-    ctrl.io.in.bits(i * 2).bits.fldst := opfldst
-    ctrl.io.in.bits(i * 2).bits.write := !opload
-    ctrl.io.in.bits(i * 2).bits.regionType := regionType
-    ctrl.io.in.bits(i * 2).bits.mask := mask1
-    ctrl.io.in.bits(i * 2).bits.last := false.B
-  }
-
-  // ---------------------------------------------------------------------------
-  // Control Port Outputs.
-  val wsel = ctrl.io.out.bits.addr(1,0)
-  val wda = ctrl.io.out.bits.data
-  val wdataS =
-    MuxOR(wsel === 0.U, wda(31,0)) |
-    MuxOR(wsel === 1.U, Cat(wda(23,16), wda(15,8), wda(7,0), wda(31,24))) |
-    MuxOR(wsel === 2.U, Cat(wda(15,8), wda(7,0), wda(31,24), wda(23,16))) |
-    MuxOR(wsel === 3.U, Cat(wda(7,0), wda(31,24), wda(23,16), wda(15,8)))
-  val wmaskB = p.lsuDataBits / 8
-  val wmaskT = (~0.U(wmaskB.W)) >> (wmaskB.U - ctrl.io.out.bits.size)
-  val wmaskS = (wmaskT << ctrl.io.out.bits.addr(linebit-1,0)) |
-               (wmaskT >> (lineoffset.U - ctrl.io.out.bits.addr(linebit-1,0)))
-  val wdata = Wire(UInt(p.lsuDataBits.W))
-  val wmask = wmaskS(lineoffset - 1, 0)
-
-  if (p.lsuDataBits == 128) {
-    wdata := Cat(wdataS, wdataS, wdataS, wdataS)
-  } else if (p.lsuDataBits == 256) {
-    wdata := Cat(wdataS, wdataS, wdataS, wdataS,
-                 wdataS, wdataS, wdataS, wdataS)
-  } else if (p.lsuDataBits == 512) {
-    wdata := Cat(wdataS, wdataS, wdataS, wdataS,
-                 wdataS, wdataS, wdataS, wdataS,
-                 wdataS, wdataS, wdataS, wdataS,
-                 wdataS, wdataS, wdataS, wdataS)
-  } else {
-    assert(false)
-  }
-
-  val busFired = (io.dbus.valid && io.dbus.ready ||
-                  io.ebus.dbus.valid && io.ebus.dbus.ready ||
-                  io.ibus.valid && io.ibus.ready)
-
-  io.dbus.valid := ctrl.io.out.valid && (ctrl.io.out.bits.sldst || ctrl.io.out.bits.fldst) && (ctrl.io.out.bits.regionType === MemoryRegionType.DMEM)
-  io.dbus.write := ctrl.io.out.bits.write
-  io.dbus.addr  := Cat(0.U(1.W), ctrl.io.out.bits.addr(30,0))
-  io.dbus.adrx  := Cat(0.U(1.W), ctrl.io.out.bits.adrx(30,0))
-  io.dbus.size  := ctrl.io.out.bits.size
-  io.dbus.wdata := wdata
-  io.dbus.wmask := wmask
-  io.dbus.pc := ctrl.io.out.bits.pc
-
-  assert(!(io.dbus.valid && ctrl.io.out.bits.addr(31)))
-  assert(!(io.dbus.valid && io.dbus.addr(31)))
-  assert(!(io.dbus.valid && io.dbus.adrx(31)))
-
-  io.ebus.dbus.valid := ctrl.io.out.valid && (ctrl.io.out.bits.sldst || ctrl.io.out.bits.fldst) &&
-    ((ctrl.io.out.bits.regionType === MemoryRegionType.External) || (ctrl.io.out.bits.regionType === MemoryRegionType.Peripheral))
-  io.ebus.dbus.write := ctrl.io.out.bits.write
-  io.ebus.dbus.addr := ctrl.io.out.bits.addr
-  io.ebus.dbus.adrx := ctrl.io.out.bits.adrx
-  io.ebus.dbus.size := ctrl.io.out.bits.size
-  io.ebus.dbus.wdata := wdata
-  io.ebus.dbus.wmask := wmask
-  io.ebus.dbus.pc := ctrl.io.out.bits.pc
-  io.ebus.internal := ctrl.io.out.bits.regionType === MemoryRegionType.Peripheral
-
-  io.ibus.valid :=
-    ctrl.io.out.valid && (ctrl.io.out.bits.sldst || ctrl.io.out.bits.fldst) &&
-    (ctrl.io.out.bits.regionType === MemoryRegionType.IMEM) &&
-    !ctrl.io.out.bits.write
-  io.ibus.addr := ctrl.io.out.bits.addr
-
-  // All stores to IMEM are disallowed.
-  val imem_store_fault =
-    (ctrl.io.out.valid && (ctrl.io.out.bits.sldst || ctrl.io.out.bits.fldst) &&
-    (ctrl.io.out.bits.regionType === MemoryRegionType.IMEM) &&
-    ctrl.io.out.bits.write)
-  val ebus_fault = io.ebus.fault.valid
-  io.fault := MuxCase(MakeInvalid(new FaultInfo(p)), Seq(
-    imem_store_fault -> (MakeWireBundle[ValidIO[FaultInfo]](
-      Valid(new FaultInfo(p)),
-      _.valid -> true.B,
-      _.bits.write -> true.B,
-      _.bits.addr -> ctrl.io.out.bits.addr,
-      _.bits.epc -> ctrl.io.out.bits.pc,
-    )),
-    ebus_fault -> (MakeWireBundle[ValidIO[FaultInfo]](
-      Valid(new FaultInfo(p)),
-      _.valid -> true.B,
-      _.bits.write -> io.ebus.fault.bits.write,
-      _.bits.addr -> io.ebus.fault.bits.addr,
-      _.bits.epc -> io.ebus.fault.bits.epc,
-    )),
-  ))
-
-  io.storeCount := PopCount(Cat(
-    io.dbus.valid && io.dbus.write,
-    io.ebus.dbus.valid && io.ebus.dbus.write
-  ))
-  io.storeComplete := MakeInvalid(UInt(32.W))
-
-  io.flush.valid  := ctrl.io.out.valid && (ctrl.io.out.bits.fencei || ctrl.io.out.bits.flushat || ctrl.io.out.bits.flushall)
-  io.flush.all    := ctrl.io.out.bits.fencei || ctrl.io.out.bits.flushall
-  io.flush.clean  := true.B
-  io.flush.fencei := ctrl.io.out.bits.fencei
-  io.flush.pcNext := ctrl.io.out.bits.pc + 4.U
-
-  ctrl.io.out.ready := io.flush.valid && io.flush.ready ||
-                       imem_store_fault ||
-                       ctrl.io.out.bits.vldst && io.dbus.ready ||
-                       (busFired)
-
-  io.vldst := ctrl.io.out.valid && ctrl.io.out.bits.vldst
-
-  // ---------------------------------------------------------------------------
-  // Load response.
-  val dataFired = (io.dbus.valid && io.dbus.ready && !io.dbus.write ||
-                      io.ebus.dbus.valid && io.ebus.dbus.ready && !io.ebus.dbus.write ||
-                      io.ibus.valid && io.ibus.ready)
-  data.io.in.valid := dataFired
-
-  data.io.in.bits.addr  := ctrl.io.out.bits.addr
-  data.io.in.bits.index := ctrl.io.out.bits.index
-  data.io.in.bits.sext  := ctrl.io.out.bits.sext
-  data.io.in.bits.size  := ctrl.io.out.bits.size
-  data.io.in.bits.fullsize  := ctrl.io.out.bits.fullsize
-  data.io.in.bits.iload := ctrl.io.out.bits.iload
-  data.io.in.bits.sldst := ctrl.io.out.bits.sldst
-  data.io.in.bits.fldst := ctrl.io.out.bits.fldst
-  data.io.in.bits.regionType := ctrl.io.out.bits.regionType
-  data.io.in.bits.mask := ctrl.io.out.bits.mask
-  data.io.in.bits.last := ctrl.io.out.bits.last
-
-  data.io.out.ready := true.B
-
-  assert(!(ctrl.io.in.valid && !data.io.in.ready))
-
-  // ---------------------------------------------------------------------------
-  // Register file ports.
-  val rvalid = data.io.out.valid && data.io.out.bits.last
-  val rsext = data.io.out.bits.sext
-  val rsize = data.io.out.bits.fullsize
-  val rsel  = data.io.out.bits.addr(linebit - 1, 0)
-
-  // Rotate and sign extend.
-  def RotSignExt(datain: UInt, dataout: UInt = 0.U(p.lsuDataBits.W), i: Int = 0): UInt = {
-    assert(datain.getWidth  == p.lsuDataBits)
-    assert(dataout.getWidth == p.lsuDataBits)
-
-    if (i < p.lsuDataBits / 8) {
-      val mod = p.lsuDataBits
-
-      val rdata = Cat(datain((8 * (i + 3) + 7) % mod, (8 * (i + 3)) % mod),
-                      datain((8 * (i + 2) + 7) % mod, (8 * (i + 2)) % mod),
-                      datain((8 * (i + 1) + 7) % mod, (8 * (i + 1)) % mod),
-                      datain((8 * (i + 0) + 7) % mod, (8 * (i + 0)) % mod))
-
-      val sizeMask = Mux(rsize === 4.U, 0xffffffff.S(32.W).asUInt,
-                     Mux(rsize === 3.U, 0x00ffffff.S(32.W).asUInt,
-                     Mux(rsize === 2.U, 0x0000ffff.U(32.W), 0x000000ff.U(32.W))))
-
-      val signExtend = Mux(rsext,
-                         Mux(rsize === 2.U,
-                           Mux(rdata(15), 0xffff0000.S(32.W).asUInt, 0.U(32.W)),
-                           Mux(rdata(7),  0xffffff00.S(32.W).asUInt, 0.U(32.W))),
-                         0.U)
-      assert(sizeMask.getWidth == 32)
-      assert(signExtend.getWidth == 32)
-
-      val sdata = MuxOR(rsel === i.U, rdata & sizeMask | signExtend)
-      RotSignExt(datain, dataout | sdata, i + 1)
-    } else {
-      dataout
-    }
-  }
-
-  val regionType = data.io.out.bits.regionType
-  val srdata = (MuxLookup(regionType, 0.U.asTypeOf(io.dbus.rdata))(Seq(
-    MemoryRegionType.DMEM -> io.dbus.rdata,
-    MemoryRegionType.IMEM -> io.ibus.rdata,
-    MemoryRegionType.External -> io.ebus.dbus.rdata,
-    MemoryRegionType.Peripheral -> io.ebus.dbus.rdata,
-  )))
-  val srdataMasked = (srdata & BytemaskToBitmask(data.io.out.bits.mask))
-  val prevSrdataReg = RegNext(srdataMasked, 0.U(p.lsuDataBits.W))
-  val prevSrdata = MuxOR(data.io.out.bits.fullsize =/= data.io.out.bits.size, prevSrdataReg(p.lsuDataBits-1,0))
-  val combinedSrdata = RotSignExt(srdataMasked | prevSrdata)
-
-  val rdata = MuxOR(data.io.out.bits.sldst, combinedSrdata)
-  val frdata = MuxOR(data.io.out.bits.fldst, combinedSrdata)
-
-  // pass-through
-  val io_rd_pre_pipe = Wire(Valid(Flipped(new RegfileWriteDataIO)))
-  io_rd_pre_pipe.valid := rvalid && data.io.out.bits.iload
-  io_rd_pre_pipe.bits.addr  := data.io.out.bits.index
-  io_rd_pre_pipe.bits.data  := rdata
-
-  // Add one cycle pipeline delay to io.rd passthrough for timing
-  val io_rd_pipe = Pipe(io_rd_pre_pipe, p.lsuDelayPipelineLen)
-  io.rd := io_rd_pipe
-
-  val io_rd_flt_pre_pipe = Wire(Valid(Flipped(new RegfileWriteDataIO)))
-  io_rd_flt_pre_pipe.valid := rvalid && data.io.out.bits.fldst
-  io_rd_flt_pre_pipe.bits.addr := data.io.out.bits.index
-  io_rd_flt_pre_pipe.bits.data := frdata
-
-  val io_rd_flt_pipe = Pipe(io_rd_flt_pre_pipe, p.lsuDelayPipelineLen)
-  io.rd_flt := io_rd_flt_pipe
-
-  io.queueCapacity := 0.U
-
-  assert(!ctrl.io.out.valid || PopCount(Cat(ctrl.io.out.bits.fldst, ctrl.io.out.bits.sldst, ctrl.io.out.bits.vldst)) <= 1.U)
-  assert(!data.io.out.valid || PopCount(Cat(data.io.out.bits.fldst, data.io.out.bits.sldst)) <= 1.U)
 }
 
 class LsuV2(p: Parameters) extends Lsu(p) {
@@ -1283,7 +965,9 @@ class LsuV2(p: Parameters) extends Lsu(p) {
   val storeUpdate = Mux(slotFired, wactive, VecInit.fill(16)(false.B))
   val transactionUpdatedSlot = Mux(slot.store,
       slot.storeUpdate(storeUpdate), loadUpdatedSlot)
-  val storeComplete = slotFired && slot.store && !slot.slotIdle() && transactionUpdatedSlot.slotIdle() && (!LsuOp.isVector(slot.op) || io.lsu2rvv.get(0).fire)
+  val lsu2RvvFire = if (p.enableRvv) { io.lsu2rvv.get(0).fire } else { false.B }
+  val storeComplete = slotFired && slot.store && !slot.slotIdle() && transactionUpdatedSlot.slotIdle() &&
+    (!LsuOp.isVector(slot.op) || lsu2RvvFire)
   io.storeComplete := Mux(storeComplete, MakeValid(slot.pc), MakeInvalid(UInt(32.W)))
 
   // ==========================================================================

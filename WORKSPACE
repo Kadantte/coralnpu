@@ -14,43 +14,50 @@
 
 workspace(name = "coralnpu_hw")
 
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
 load(
     "//rules:repos.bzl",
     "cvfpu_repos",
     "fpga_repos",
     "coralnpu_repos",
-    "renode_repos",
+    "coralnpu_repos2",
     "rvvi_repos",
     "tflite_repos",
 )
 
-coralnpu_repos()
-
-load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
-
-grpc_deps()
-
-# Minimal set from grpc_extra_deps
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
-
-protobuf_deps()
-
-load("@build_bazel_rules_apple//apple:repositories.bzl", "apple_rules_dependencies")
-
-apple_rules_dependencies(ignore_version_differences = False)
-
-load("@com_google_googleapis//:repository_rules.bzl", "switched_rules_by_language")
-
-switched_rules_by_language(
-    name = "com_google_googleapis_imports",
-    cc = True,
-    grpc = True,
-    python = True,
+http_archive(
+    name = "rules_cc",
+    urls = ["https://github.com/bazelbuild/rules_cc/archive/refs/tags/0.0.10.tar.gz"],
+    sha256 = "65b67b81c6da378f136cc7e7e14ee08d5b9375973427eceb8c773a4f69fa7e49",
+    strip_prefix = "rules_cc-0.0.10",
 )
 
-load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
+load("@rules_cc//cc:repositories.bzl", "rules_cc_dependencies", "rules_cc_toolchains")
 
-go_rules_dependencies()
+rules_cc_dependencies()
+
+rules_cc_toolchains()
+
+coralnpu_repos()
+
+load("@rules_python//python:repositories.bzl", "py_repositories")
+
+py_repositories()
+
+load("@rules_python//python:repositories.bzl", "python_register_toolchains")
+
+python_register_toolchains(
+    name = "python311",
+    python_version = "3.11.6",
+)
+load("@pybind11_bazel//:python_configure.bzl", "python_configure")
+python_configure(
+    name = "local_config_python",
+    python_version = "3",
+    python_interpreter_target = "@python311_x86_64-unknown-linux-gnu//:python",
+)
+coralnpu_repos2()
 
 # Scala setup
 load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
@@ -83,18 +90,9 @@ load("//rules:deps.bzl", "coralnpu_deps")
 
 coralnpu_deps()
 
-renode_repos()
-
 cvfpu_repos()
 
 rvvi_repos()
-
-load("@rules_python//python:repositories.bzl", "python_register_toolchains")
-
-python_register_toolchains(
-    name = "python39",
-    python_version = "3.9",
-)
 
 fpga_repos()
 
@@ -102,12 +100,11 @@ load("@lowrisc_opentitan_gh//rules:nonhermetic.bzl", "nonhermetic_repo")
 
 nonhermetic_repo(name = "nonhermetic")
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@rules_python//python:pip.bzl", "pip_parse")
 
 pip_parse(
     name = "ot_python_deps",
-    python_interpreter_target = "@python39_x86_64-unknown-linux-gnu//:python",
+    python_interpreter_target = "@python311_x86_64-unknown-linux-gnu//:python",
     requirements_lock = "@lowrisc_opentitan_gh//:python-requirements.txt",
 )
 
@@ -170,7 +167,7 @@ tf_micro_workspace()
 
 pip_parse(
     name = "tflm_pip_deps",
-    python_interpreter_target = "@python39_x86_64-unknown-linux-gnu//:python",
+    python_interpreter_target = "@python311_x86_64-unknown-linux-gnu//:python",
     requirements_lock = "@tflite_micro//third_party:python_requirements.txt",
 )
 

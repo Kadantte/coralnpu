@@ -145,7 +145,9 @@ object RotateVectorLeft {
   def apply[T <: Data](data: Vec[T], shift: UInt): Vec[T] = {
     val elemSize = data(0).asUInt.getWidth
     val rotated = data.asUInt.rotateLeft(shift * elemSize.U)
-    rotated.asTypeOf(chiselTypeOf(data))
+    suppressEnumCastWarning {
+      rotated.asTypeOf(chiselTypeOf(data))
+    }
   }
 }
 
@@ -155,7 +157,9 @@ object RotateVectorRight {
   def apply[T <: Data](data: Vec[T], shift: UInt): Vec[T] = {
     val elemSize = data(0).asUInt.getWidth
     val rotated = data.asUInt.rotateRight(shift * elemSize.U)
-    rotated.asTypeOf(chiselTypeOf(data))
+    suppressEnumCastWarning {
+      rotated.asTypeOf(chiselTypeOf(data))
+    }
   }
 }
 
@@ -210,4 +214,22 @@ object LoopingCounter {
         _.curr -> 0.U,
         _.max -> max,
     )
+}
+
+// A variant on Mux1H, that accepts a "up-to-one-hot" input. This variation
+// allows the case where all inputs can be false. Internally, it calls Mux1H but
+// with a "default case" appended to the specified selectors.
+// Usage of MuxUpTo1H is preferrable to MuxCase, as MuxUpTo1H can generate a
+// Mux tree, which is faster the the chain generated MuxCase or PriorityMux.
+object MuxUpTo1H {
+  def apply[T <: Data](defaultVal: T, sel: Seq[Bool], data: Seq[T]): T = {
+    assert(PopCount(sel) <= 1.U)
+
+    val defaultSel = !sel.reduce(_||_)
+    Mux1H(sel ++ Seq(defaultSel), data ++ Seq(defaultVal))
+  }
+
+  def apply[T <: Data](defaultVal: T, sel: Seq[(Bool, T)]): T = {
+    apply(defaultVal, sel.map(_._1), sel.map(_._2))
+  }
 }

@@ -55,7 +55,7 @@ cocotb_test_suite(
     testcases = RUN_RVV_OPT_TESTS,
     testcases_vname = "RUN_RVV_OPT_TESTS",
     tests_kwargs = {
-        "waves": True,
+        "waves": False,
         "hdl_toplevel": "RvvCoreMiniAxi",
         "seed": "42",
         "test_module": ["cocotb_rvv_opt_test.py"],
@@ -65,6 +65,7 @@ cocotb_test_suite(
             "@rules_python//python/runfiles",
         ],
         "data": [":rvv_memcpy_test"],
+        "size": "medium",
     },
     vcs_build_args = VCS_BUILD_ARGS,
     vcs_data = [":rvv_memcpy_test.elf"] + [

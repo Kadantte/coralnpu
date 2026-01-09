@@ -43,7 +43,7 @@ cocotb_test_suite(
     testcases = TUTORIAL_TESTCASES,
     testcases_vname = "TUTORIAL_TESTCASES",
     tests_kwargs = {
-        "waves": True,
+        "waves": False,
         "hdl_toplevel": "CoreMiniAxi",
         "seed": "42",
         "test_module": ["tutorial.py"],
@@ -52,6 +52,7 @@ cocotb_test_suite(
             "@rules_python//python/runfiles",
         ],
         "data": [":coralnpu_v2_program"],
+        "size": "small",
     },
     vcs_build_args = VCS_BUILD_ARGS,
     vcs_data = [
@@ -73,7 +74,7 @@ cocotb_test_suite(
     testcases = HELLO_WORLD_TESTCASES,
     testcases_vname = "HELLO_WORLD_TESTCASES",
     tests_kwargs = {
-        "waves": True,
+        "waves": False,
         "hdl_toplevel": "CoreMiniAxi",
         "seed": "42",
         "test_module": ["hello_world_float_core_mini_axi.py"],
@@ -82,6 +83,7 @@ cocotb_test_suite(
             "@bazel_tools//tools/python/runfiles",
         ],
         "data": ["//examples:coralnpu_v2_hello_world_add_floats.elf"],
+        "size": "small",
     },
     vcs_build_args = VCS_BUILD_ARGS,
     vcs_data = [

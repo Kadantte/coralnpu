@@ -32,6 +32,7 @@ object GenerateCoreShimSource {
         |    input logic [VSTART_LEN:0] vstart,
         |    input logic [1:0] vxrm,
         |    input logic vxsat,
+        |    input logic [2:0] frm,
         |""".stripMargin.replaceAll("VSTART_LEN", (log2Ceil(vlen) - 1).toString)
 
     // Add instruction interface inputs
@@ -50,6 +51,12 @@ object GenerateCoreShimSource {
             |""".stripMargin.replaceAll("GENI", i.toString)
     }
 
+    // Add float regfile read interface inputs
+    for (i <- 0 until instructionLanes) {
+        moduleInterface += """    input [31:0] frs_GENI,
+            |""".stripMargin.replaceAll("GENI", i.toString)
+    }
+
     // Add instruction interface outputs (backpressure)
     for (i <- 0 until instructionLanes) {
         moduleInterface += "    output inst_GENI_ready,\n".replaceAll(
@@ -63,10 +70,15 @@ object GenerateCoreShimSource {
             |    output [31:0] rd_GENI_bits_data,
             |""".stripMargin.replaceAll("GENI", i.toString)
     }
+
     moduleInterface += """    output async_rd_valid,
         |    output [4:0] async_rd_bits_addr,
         |    output [31:0] async_rd_bits_data,
         |    input async_rd_ready,
+        |    output async_frd_valid,
+        |    output [4:0] async_frd_bits_addr,
+        |    output [31:0] async_frd_bits_data,
+        |    input async_frd_ready,
         |""".stripMargin
 
     // RVV to LSU
@@ -113,6 +125,7 @@ object GenerateCoreShimSource {
         |    output [1:0] configXrm,
         |    output [2:0] configSew,
         |    output [2:0] configLmul,
+        |    output [2:0] configLmulOrig,
         |    output configVill,
         |    output logic rvv_idle,
         |    output logic [3:0] queue_capacity,
@@ -134,6 +147,7 @@ object GenerateCoreShimSource {
             |    output rd_rob2rt_o_GENI_vector_csr_xrm,
             |    output rd_rob2rt_o_GENI_vector_csr_sew,
             |    output rd_rob2rt_o_GENI_vector_csr_lmul,
+            |    output rd_rob2rt_o_GENI_vector_csr_lmul_orig,
             |    output rd_rob2rt_o_GENI_vector_csr_vill,
             |    output [15:0] rd_rob2rt_o_GENI_vxsaturate,""".stripMargin.replaceAll("GENI", i.toString)
     }
@@ -183,6 +197,14 @@ object GenerateCoreShimSource {
             "GENN", instructionLanes.toString)
     for (i <- 0 until 2*instructionLanes) {
       coreInstantiation += "  assign reg_read_data[GENI] = rs_GENI_data;\n".replaceAll(
+          "GENI", i.toString)
+    }
+
+    // Float regfile read
+    coreInstantiation += "  logic [GENN-1:0][31:0] freg_read_data;\n".replaceAll(
+            "GENN", instructionLanes.toString)
+    for (i <- 0 until instructionLanes) {
+      coreInstantiation += "  assign freg_read_data[GENI] = frs_GENI;\n".replaceAll(
           "GENI", i.toString)
     }
 
@@ -256,11 +278,13 @@ object GenerateCoreShimSource {
         |      .vstart(vstart),
         |      .vxrm(vxrm),
         |      .vxsat(vxsat),
+        |      .frm(frm),
         |      .inst_valid(inst_valid),
         |      .inst_data(inst_data),
         |      .inst_ready(inst_ready),
         |      .reg_read_valid(reg_read_valid),
         |      .reg_read_data(reg_read_data),
+        |      .freg_read_data(freg_read_data),
         |      .reg_write_valid(reg_write_valid),
         |      .reg_write_addr(reg_write_addr),
         |      .reg_write_data(reg_write_data),
@@ -268,6 +292,10 @@ object GenerateCoreShimSource {
         |      .async_rd_addr(async_rd_bits_addr),
         |      .async_rd_data(async_rd_bits_data),
         |      .async_rd_ready(async_rd_ready),
+        |      .async_frd_valid(async_frd_valid),
+        |      .async_frd_addr(async_frd_bits_addr),
+        |      .async_frd_data(async_frd_bits_data),
+        |      .async_frd_ready(async_frd_ready),
         |      .uop_lsu_valid_rvv2lsu(uop_lsu_valid_rvv2lsu),
         |      .uop_lsu_idx_valid_rvv2lsu(uop_lsu_idx_valid_rvv2lsu),
         |      .uop_lsu_idx_addr_rvv2lsu(uop_lsu_idx_addr_rvv2lsu),
@@ -310,6 +338,7 @@ object GenerateCoreShimSource {
       |  assign rd_rob2rt_o_GENI_vector_csr_xrm = rd_rob2rt_o[GENI].vector_csr.xrm;
       |  assign rd_rob2rt_o_GENI_vector_csr_sew = rd_rob2rt_o[GENI].vector_csr.sew;
       |  assign rd_rob2rt_o_GENI_vector_csr_lmul = rd_rob2rt_o[GENI].vector_csr.lmul;
+      |  assign rd_rob2rt_o_GENI_vector_csr_lmul_orig = rd_rob2rt_o[GENI].vector_csr.lmul_orig;
       |  assign rd_rob2rt_o_GENI_vector_csr_vill = rd_rob2rt_o[GENI].vector_csr.vill;
       |  assign rd_rob2rt_o_GENI_vxsaturate = rd_rob2rt_o[GENI].vxsaturate;
       |""".stripMargin.replaceAll("GENI", i.toString)
@@ -334,6 +363,7 @@ object GenerateCoreShimSource {
     coreInstantiation += "  assign configXrm = config_state.xrm;\n"
     coreInstantiation += "  assign configSew = config_state.sew;\n"
     coreInstantiation += "  assign configLmul = config_state.lmul;\n"
+    coreInstantiation += "  assign configLmulOrig = config_state.lmul_orig;\n"
     coreInstantiation += "  assign configVill = config_state.vill;\n"
 
     moduleInterface + coreInstantiation + "endmodule\n"
@@ -351,14 +381,17 @@ class RvvCoreWrapper(p: Parameters) extends BlackBox with HasBlackBoxInline
     val vstart = Input(UInt(log2Ceil(p.rvvVlen).W))
     val vxrm = Input(UInt(2.W))
     val vxsat = Input(UInt(1.W))
+    val frm = Input(UInt(3.W))
 
     val inst = Vec(p.instructionLanes,
         Flipped(Decoupled(new RvvCompressedInstruction)))
 
     val rs = Vec(p.instructionLanes * 2, Flipped(new RegfileReadDataIO))
     val rd = Vec(p.instructionLanes, Valid(new RegfileWriteDataIO))
+    val frs = Vec(p.instructionLanes, Input(UInt(32.W)))
 
     val async_rd = Decoupled(new RegfileWriteDataIO)
+    val async_frd = Decoupled(new RegfileWriteDataIO)
 
     val rd_rob2rt_o = Vec(4, new Rob2Rt(p))
     val trap = Output(Valid(new RvvCompressedInstruction))
@@ -381,7 +414,10 @@ class RvvCoreWrapper(p: Parameters) extends BlackBox with HasBlackBoxInline
     val configTa = Output(Bool())
     val configXrm = Output(UInt(2.W))
     val configSew = Output(UInt(3.W))
+    // This may be reduced according to vl.
     val configLmul = Output(UInt(3.W))
+    // This is the original one set in vset(i)vl(i)
+    val configLmulOrig = Output(UInt(3.W))
     val configVill = Output(Bool())
     val rvv_idle = Output(Bool())
     val queue_capacity = Output(UInt(4.W))
@@ -463,7 +499,9 @@ class RvvCoreShim(p: Parameters) extends Module {
   rvvCoreWrapper.io.inst <> io.inst
   rvvCoreWrapper.io.rs <> io.rs
   rvvCoreWrapper.io.rd <> io.rd
+  rvvCoreWrapper.io.frs <> io.frs
   rvvCoreWrapper.io.async_rd <> io.async_rd
+  rvvCoreWrapper.io.async_frd <> io.async_frd
   rvvCoreWrapper.io.rd_rob2rt_o <> io.rd_rob2rt_o
   io.trap := rvvCoreWrapper.io.trap
 
@@ -473,6 +511,7 @@ class RvvCoreShim(p: Parameters) extends Module {
       io.csr.vxrm_write.valid, io.csr.vxrm_write.bits, vxrm)
   rvvCoreWrapper.io.vxsat := Mux(
       io.csr.vxsat_write.valid, io.csr.vxsat_write.bits, vxsat)
+  rvvCoreWrapper.io.frm := io.csr.frm
   rvvCoreWrapper.io.vcsr_ready := true.B
 
   io.rvv2lsu <> rvvCoreWrapper.io.rvv2lsu
@@ -485,16 +524,17 @@ class RvvCoreShim(p: Parameters) extends Module {
       !io.csr.vstart_write.valid &&
       !io.csr.vxrm_write.valid &&
       !io.csr.vxsat_write.valid
-  io.configState.bits.vl     := rvvCoreWrapper.io.configVl
-  io.configState.bits.vstart := rvvCoreWrapper.io.configVstart
-  io.configState.bits.ma     := rvvCoreWrapper.io.configMa
-  io.configState.bits.ta     := rvvCoreWrapper.io.configTa
-  io.configState.bits.xrm    := rvvCoreWrapper.io.configXrm
-  io.configState.bits.sew    := rvvCoreWrapper.io.configSew
-  io.configState.bits.lmul   := rvvCoreWrapper.io.configLmul
-  io.configState.bits.vill   := rvvCoreWrapper.io.configVill
-  io.rvv_idle                := rvvCoreWrapper.io.rvv_idle
-  io.queue_capacity          := rvvCoreWrapper.io.queue_capacity
+  io.configState.bits.vl          := rvvCoreWrapper.io.configVl
+  io.configState.bits.vstart      := rvvCoreWrapper.io.configVstart
+  io.configState.bits.ma          := rvvCoreWrapper.io.configMa
+  io.configState.bits.ta          := rvvCoreWrapper.io.configTa
+  io.configState.bits.xrm         := rvvCoreWrapper.io.configXrm
+  io.configState.bits.sew         := rvvCoreWrapper.io.configSew
+  io.configState.bits.lmul        := rvvCoreWrapper.io.configLmul
+  io.configState.bits.lmul_orig   := rvvCoreWrapper.io.configLmulOrig
+  io.configState.bits.vill        := rvvCoreWrapper.io.configVill
+  io.rvv_idle                     := rvvCoreWrapper.io.rvv_idle
+  io.queue_capacity               := rvvCoreWrapper.io.queue_capacity
 
   val vstart_wdata = MuxCase(vstart, Seq(
       rvvCoreWrapper.io.vcsr_valid -> rvvCoreWrapper.io.vcsr_vstart,

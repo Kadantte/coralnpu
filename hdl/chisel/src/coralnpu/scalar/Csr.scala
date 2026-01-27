@@ -14,6 +14,7 @@
 
 package coralnpu
 
+import common.{MakeInvalid, MakeValid, MuxUpTo1H}
 import chisel3._
 import chisel3.util._
 import coralnpu.float.{CsrFloatIO}
@@ -29,6 +30,7 @@ class CsrRvvIO(p: Parameters) extends Bundle {
   val vstart_write = Output(Valid(UInt(log2Ceil(p.rvvVlen).W)))
   val vxrm_write = Output(Valid(UInt(2.W)))
   val vxsat_write = Output(Valid(Bool()))
+  val frm = Output(UInt(3.W))
 }
 
 object Csr {
@@ -38,6 +40,9 @@ object Csr {
 }
 
 object CsrAddress extends ChiselEnum {
+  // Per spec, this is not allocated. We use this internally to
+  // represent an invalid address.
+  val RESERVED  = Value(0x000.U(12.W))
   val FFLAGS    = Value(0x001.U(12.W))
   val FRM       = Value(0x002.U(12.W))
   val FCSR      = Value(0x003.U(12.W))
@@ -142,15 +147,7 @@ class Tdata1 extends Bundle {
 }
 
 class CsrCounters(p: Parameters) extends Bundle {
-  val rfwriteCount = UInt(3.W)
-  val storeCount = UInt(2.W)
-  val branchCount = UInt(1.W)
-  val vrfwriteCount = if (p.enableVector) {
-    Some(UInt(3.W))
-  } else { None }
-  val vstoreCount = if (p.enableVector) {
-    Some(UInt(2.W))
-  } else { None }
+  val nRetired = UInt(log2Ceil(p.instructionLanes + 1).W)
 }
 
 class CsrBruIO(p: Parameters) extends Bundle {
@@ -190,11 +187,6 @@ class Csr(p: Parameters) extends Module {
     val float = Option.when(p.enableFloat) { Flipped(new CsrFloatIO(p)) }
     val rvv = Option.when(p.enableRvv) { new CsrRvvIO(p) }
 
-    // Vector core.
-    val vcore = (if (p.enableVector) {
-      Some(Input(new Bundle { val undef = Bool() }))
-    } else { None })
-
     val counters = Input(new CsrCounters(p))
 
     // Pipeline Control.
@@ -210,7 +202,7 @@ class Csr(p: Parameters) extends Module {
       val dcsr_step = Output(Bool())
       val next_pc = Input(UInt(32.W))
     })
-    val trace = Option.when(p.useRetirementBuffer)(Output(new CsrTraceIO(p)))
+    val trace = Output(new CsrTraceIO(p))
   })
 
   def LegalizeTdata1(wdata: UInt): Tdata1 = {
@@ -224,8 +216,9 @@ class Csr(p: Parameters) extends Module {
     newWdata
   }
 
-  // Control registers.
-  val req = Pipe(io.req)
+  // Control registers. CsrAddress.RESERVED is used for invalid values.
+  val req = RegInit(MakeInvalid(new CsrCmd))
+  req := MakeValid(io.req.valid, io.req.bits, bitsWhenInvalid=req.bits)
 
   // Pipeline Control.
   val halted = RegInit(false.B)
@@ -278,7 +271,6 @@ class Csr(p: Parameters) extends Module {
   // 32-bit MXLEN, I,M,X extensions
   val misa      = RegInit(((
       0x40001100 |
-      (if (p.enableVector) { 1 << 23 /* 'X' */ } else { 0 }) |
       (if (p.enableRvv) { 1 << 21 /* 'V' */ } else { 0 }) |
       (if (p.enableFloat) { 1 << 5 /* 'F' */ } else { 0 })
   ).U)(32.W))
@@ -359,12 +351,11 @@ class Csr(p: Parameters) extends Module {
   val kscm4En     = csr_address === CsrAddress.KSCM4
 
   // Pipeline Control.
-  val vcoreUndef = if (p.enableVector) { io.vcore.get.undef } else { false.B }
-  when (io.bru.in.halt || vcoreUndef) {
+  when (io.bru.in.halt) {
     halted := true.B
   }
 
-  when (io.bru.in.fault || vcoreUndef) {
+  when (io.bru.in.fault) {
     fault := true.B
   }
 
@@ -379,7 +370,7 @@ class Csr(p: Parameters) extends Module {
   // Register state.
   val rs1 = io.rs1.data
 
-  val rdata = MuxCase(0.U(32.W), Seq(
+  val rdata = MuxUpTo1H(0.U(32.W), Seq(
       fflagsEn    -> Cat(0.U(27.W), fflags),
       frmEn       -> Cat(0.U(29.W), frm),
       fcsrEn      -> Cat(0.U(24.W), fcsr),
@@ -484,6 +475,7 @@ class Csr(p: Parameters) extends Module {
     io.rvv.get.vxrm_write.bits    := wdata(1,0)
     io.rvv.get.vxsat_write.valid  := req.valid && vxsatEn.get
     io.rvv.get.vxsat_write.bits   := wdata(0)
+    io.rvv.get.frm                := frm
   }
 
   // mcycle implementation
@@ -500,17 +492,8 @@ class Csr(p: Parameters) extends Module {
   val minstret_th = Mux(minstrethEn, wdata, minstret(63,32))
   val minstret_tl = Mux(minstretEn, wdata, minstret(31,0))
   val minstret_t = Cat(minstret_th, minstret_tl)
-  val minstretThisCycle = io.counters.rfwriteCount +
-    io.counters.storeCount +
-    io.counters.branchCount +
-    (if (p.enableVector) {
-      io.counters.vrfwriteCount.get +
-      io.counters.vstoreCount.get
-    } else { 0.U })
-  minstret := MuxCase(minstret, Seq(
-    req.valid -> minstret_t,
-    (minstretThisCycle =/= 0.U) -> (minstret + minstretThisCycle),
-  ))
+  val minstretThisCycle = io.counters.nRetired
+  minstret := Mux(req.valid, minstret_t, minstret) + minstretThisCycle
 
   if (p.useDebugModule) {
     val trigger_enabled = tdata1.get.isTrigger6
@@ -591,17 +574,16 @@ class Csr(p: Parameters) extends Module {
   io.csr.out.value(5) := mcycle(63,32)
   io.csr.out.value(6) := minstret(31,0)
   io.csr.out.value(7) := minstret(63,32)
+  io.csr.out.value(8) := mcontext0
 
   // Write port.
   io.rd.valid := req.valid
   io.rd.bits.addr  := req.bits.addr
   io.rd.bits.data  := rdata
 
-  if (p.useRetirementBuffer) {
-    io.trace.get.valid := req.valid
-    io.trace.get.addr := req.bits.index
-    io.trace.get.data := wdata
-  }
+  io.trace.valid := req.valid && !(req.bits.op.isOneOf(CsrOp.CSRRS, CsrOp.CSRRC) && req.bits.rs1 === 0.U)
+  io.trace.addr := req.bits.index
+  io.trace.data := wdata
 
   // Assertions.
   assert(!(req.valid && !io.rs1.valid))

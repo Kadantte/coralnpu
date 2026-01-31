@@ -14,43 +14,55 @@
 
 workspace(name = "coralnpu_hw")
 
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
 load(
     "//rules:repos.bzl",
     "cvfpu_repos",
     "fpga_repos",
     "coralnpu_repos",
-    "renode_repos",
+    "coralnpu_repos2",
     "rvvi_repos",
     "tflite_repos",
+    "mpact_repos",
 )
+
+http_archive(
+    name = "rules_cc",
+    sha256 = "69ceb454b9b29e0aba7da81c72e96ecafd81d2044be883b46398b1c77ca7fff9",
+    strip_prefix = "rules_cc-0.2.9",
+    url = "https://github.com/bazelbuild/rules_cc/releases/download/0.2.9/rules_cc-0.2.9.tar.gz",
+)
+
+load("@rules_cc//cc:repositories.bzl", "rules_cc_dependencies", "rules_cc_toolchains")
+
+rules_cc_dependencies()
+
+register_toolchains(
+    "//toolchain/host_clang:host_clang_toolchain_def",
+)
+
+rules_cc_toolchains()
 
 coralnpu_repos()
 
-load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
+load("@rules_python//python:repositories.bzl", "py_repositories")
 
-grpc_deps()
+py_repositories()
 
-# Minimal set from grpc_extra_deps
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
+load("@rules_python//python:repositories.bzl", "python_register_toolchains")
 
-protobuf_deps()
-
-load("@build_bazel_rules_apple//apple:repositories.bzl", "apple_rules_dependencies")
-
-apple_rules_dependencies(ignore_version_differences = False)
-
-load("@com_google_googleapis//:repository_rules.bzl", "switched_rules_by_language")
-
-switched_rules_by_language(
-    name = "com_google_googleapis_imports",
-    cc = True,
-    grpc = True,
-    python = True,
+python_register_toolchains(
+    name = "python311",
+    python_version = "3.11.6",
 )
-
-load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
-
-go_rules_dependencies()
+load("@pybind11_bazel//:python_configure.bzl", "python_configure")
+python_configure(
+    name = "local_config_python",
+    python_version = "3",
+    python_interpreter_target = "@python311_x86_64-unknown-linux-gnu//:python",
+)
+coralnpu_repos2()
 
 # Scala setup
 load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
@@ -83,18 +95,9 @@ load("//rules:deps.bzl", "coralnpu_deps")
 
 coralnpu_deps()
 
-renode_repos()
-
 cvfpu_repos()
 
 rvvi_repos()
-
-load("@rules_python//python:repositories.bzl", "python_register_toolchains")
-
-python_register_toolchains(
-    name = "python39",
-    python_version = "3.9",
-)
 
 fpga_repos()
 
@@ -102,12 +105,11 @@ load("@lowrisc_opentitan_gh//rules:nonhermetic.bzl", "nonhermetic_repo")
 
 nonhermetic_repo(name = "nonhermetic")
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@rules_python//python:pip.bzl", "pip_parse")
 
 pip_parse(
     name = "ot_python_deps",
-    python_interpreter_target = "@python39_x86_64-unknown-linux-gnu//:python",
+    python_interpreter_target = "@python311_x86_64-unknown-linux-gnu//:python",
     requirements_lock = "@lowrisc_opentitan_gh//:python-requirements.txt",
 )
 
@@ -170,7 +172,7 @@ tf_micro_workspace()
 
 pip_parse(
     name = "tflm_pip_deps",
-    python_interpreter_target = "@python39_x86_64-unknown-linux-gnu//:python",
+    python_interpreter_target = "@python311_x86_64-unknown-linux-gnu//:python",
     requirements_lock = "@tflite_micro//third_party:python_requirements.txt",
 )
 
@@ -178,7 +180,34 @@ load("@tflm_pip_deps//:requirements.bzl", "install_deps")
 
 install_deps()
 
+http_archive(
+    name = "bazel_features",
+    sha256 = "07bd2b18764cdee1e0d6ff42c9c0a6111ffcbd0c17f0de38e7f44f1519d1c0cd",
+    strip_prefix = "bazel_features-1.32.0",
+    url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.32.0/bazel_features-v1.32.0.tar.gz",
+)
+
+load("@bazel_features//:deps.bzl", "bazel_features_deps")
+
+bazel_features_deps()
+
+load("@rules_cc//cc:extensions.bzl", "compatibility_proxy_repo")
+
+compatibility_proxy_repo()
+
+mpact_repos()
+
+load("@com_google_mpact-riscv//:repos.bzl", "mpact_riscv_repos")
+mpact_riscv_repos()
+
+load("@com_google_mpact-riscv//:dep_repos.bzl", "mpact_riscv_dep_repos")
+mpact_riscv_dep_repos()
+
+load("@com_google_mpact-riscv//:deps.bzl", "mpact_riscv_deps")
+mpact_riscv_deps()
+
 load("@coralnpu_hw//rules:check_folder.bzl", "check_folder")
+
 check_folder(
     name = "internal_check",
     directory = "internal",

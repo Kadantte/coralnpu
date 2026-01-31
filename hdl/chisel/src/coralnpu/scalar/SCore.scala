@@ -42,9 +42,6 @@ class SCore(p: Parameters) extends Module {
     val dbus = new DBusIO(p)
     val ebus = new EBusIO(p)
 
-    val vldst = Option.when(p.enableVector)(Output(Bool()))
-    val vcore = Option.when(p.enableVector)(Flipped(new VCoreIO(p)))
-
     val rvvcore = Option.when(p.enableRvv)(Flipped(new RvvCoreIO(p)))
 
     val iflush = new IFlushIO(p)
@@ -59,29 +56,31 @@ class SCore(p: Parameters) extends Module {
   val fetch = if (p.enableFetchL0) { Fetch(p) } else { Module(new UncachedFetch(p)) }
 
   val csr = Csr(p)
-  val dispatch = if (p.useDispatchV2) {
-      Module(new DispatchV2(p))
-  } else {
-      Module(new DispatchV1(p))
-  }
+  val dispatch = Module(new DispatchV2(p))
 
-  val retirement_buffer = Option.when(p.useRetirementBuffer)(Module(new RetirementBuffer(p)))
-  if (p.useRetirementBuffer) {
-    retirement_buffer.get.io.inst := dispatch.io.inst
-    retirement_buffer.get.io.writeAddrScalar := dispatch.io.rdMark
-    (0 until p.instructionLanes + 2).foreach(i => {
-      retirement_buffer.get.io.writeDataScalar(i) := regfile.io.writeData(i)
+  val lsu = Lsu(p)
+  val fault_manager = Module(new FaultManager(p))
+  val retirement_buffer = Module(new RetirementBuffer(p, mini = !p.useRetirementBuffer))
+  val rob_io = retirement_buffer.io
+
+  rob_io.inst := dispatch.io.inst
+  rob_io.writeAddrScalar := dispatch.io.rdMark
+  (0 until p.instructionLanes + 2).foreach(i => {
+    rob_io.writeDataScalar(i) := regfile.io.writeData(i)
+  })
+  dispatch.io.retirement_buffer_nSpace := rob_io.nSpace
+  dispatch.io.retirement_buffer_empty := rob_io.empty
+  dispatch.io.retirement_buffer_trap_pending := rob_io.trapPending
+  if (p.enableRvv) {
+    rob_io.writeAddrVector.get := dispatch.io.rvvRdMark.get
+    (0 until p.instructionLanes).foreach(i => {
+      rob_io.writeDataVector.get(i).valid := io.rvvcore.get.rd_rob2rt_o(i).w_valid
+      rob_io.writeDataVector.get(i).bits.addr := io.rvvcore.get.rd_rob2rt_o(i).w_index
+      rob_io.writeDataVector.get(i).bits.data := io.rvvcore.get.rd_rob2rt_o(i).w_data
     })
-    dispatch.io.retirement_buffer_nSpace.get := retirement_buffer.get.io.nSpace
-    if (p.enableRvv) {
-      retirement_buffer.get.io.writeAddrVector.get := dispatch.io.rvvRdMark.get
-      (0 until p.instructionLanes).foreach(i => {
-        retirement_buffer.get.io.writeDataVector.get(i).valid := io.rvvcore.get.rd_rob2rt_o(i).w_valid
-        retirement_buffer.get.io.writeDataVector.get(i).bits.addr := io.rvvcore.get.rd_rob2rt_o(i).w_index
-        retirement_buffer.get.io.writeDataVector.get(i).bits.data := io.rvvcore.get.rd_rob2rt_o(i).w_data
-      })
-    }
   }
+  rob_io.fault := fault_manager.io.out
+  rob_io.storeComplete := lsu.io.storeComplete
 
   if (p.useDebugModule) {
     dispatch.io.single_step.get := csr.io.dm.get.single_step || csr.io.dm.get.dcsr_step
@@ -90,7 +89,6 @@ class SCore(p: Parameters) extends Module {
 
   val alu = Seq.fill(p.instructionLanes)(Alu(p))
   val bru = (0 until p.instructionLanes).map(x => Seq(Bru(p, x == 0))).reduce(_ ++ _)
-  val lsu = Lsu(p)
   val mlu = Mlu(p)
   val dvu = Dvu(p)
 
@@ -126,7 +124,7 @@ class SCore(p: Parameters) extends Module {
   // Decode/Dispatch
   dispatch.io.inst <> fetch.io.inst.lanes
   dispatch.io.halted := csr.io.halted || csr.io.wfi || csr.io.dm.map(_.debug_mode).getOrElse(false.B)
-  dispatch.io.mactive := io.vcore.map(_.mactive).getOrElse(false.B)
+  dispatch.io.mactive := false.B
   dispatch.io.lsuActive := lsu.io.active
   dispatch.io.lsuQueueCapacity := lsu.io.queueCapacity
   dispatch.io.scoreboard.comb := regfile.io.scoreboard.comb
@@ -135,7 +133,6 @@ class SCore(p: Parameters) extends Module {
   dispatch.io.interlock := bru(0).io.interlock.get || lsu.io.flush.valid
 
   // Connect fault signaling to FaultManager.
-  val fault_manager = Module(new FaultManager(p))
   for (i <- 0 until p.instructionLanes) {
     fault_manager.io.in.fault(i).csr := dispatch.io.csrFault(i)
     fault_manager.io.in.fault(i).jal := dispatch.io.jalFault(i)
@@ -150,11 +147,7 @@ class SCore(p: Parameters) extends Module {
     fault_manager.io.in.undef(i).inst := fetch.io.inst.lanes(i).bits.inst
     fault_manager.io.in.jal(i).target := dispatch.io.bruTarget(i)
   }
-  fault_manager.io.in.memory_fault := MuxCase(MakeInvalid(new FaultInfo(p)), Seq(
-    io.ibus.fault.valid -> io.ibus.fault,
-    lsu.io.fault.valid -> lsu.io.fault,
-  ))
-  fault_manager.io.in.ibus_fault := io.ibus.fault.valid
+  fault_manager.io.in.memory_fault := lsu.io.fault
   if (p.enableRvv) {
     fault_manager.io.in.rvv_fault.get.valid := io.rvvcore.get.trap.valid
     fault_manager.io.in.rvv_fault.get.bits.mepc := io.rvvcore.get.trap.bits.pc
@@ -164,10 +157,6 @@ class SCore(p: Parameters) extends Module {
     fault_manager.io.in.rvv_fault.get.bits.decode := false.B
   }
   bru(0).io.fault_manager.get := fault_manager.io.out
-  if (p.useRetirementBuffer) {
-    retirement_buffer.get.io.fault := fault_manager.io.out
-    retirement_buffer.get.io.storeComplete := lsu.io.storeComplete
-  }
 
   // ---------------------------------------------------------------------------
   // ALU
@@ -190,13 +179,7 @@ class SCore(p: Parameters) extends Module {
   bru(0).io.csr.get <> csr.io.bru
 
   // Instruction counters
-  csr.io.counters.rfwriteCount := regfile.io.rfwriteCount
-  csr.io.counters.storeCount := lsu.io.storeCount
-  csr.io.counters.branchCount := bru(0).io.taken.valid
-  if (p.enableVector) {
-    csr.io.counters.vrfwriteCount.get := io.vcore.get.vrfwriteCount
-    csr.io.counters.vstoreCount.get := io.vcore.get.vstoreCount
-  }
+  csr.io.counters.nRetired := rob_io.nRetired
 
   // ---------------------------------------------------------------------------
   // Control Status Unit
@@ -235,10 +218,6 @@ class SCore(p: Parameters) extends Module {
     io.dm.get.debug_mode := csr.io.dm.get.debug_mode
   } else {
     csr.io.rs1 := regfile.io.readData(0)
-  }
-
-  if (p.enableVector) {
-    csr.io.vcore.get.undef := io.vcore.get.undef
   }
 
   // ---------------------------------------------------------------------------
@@ -304,42 +283,27 @@ class SCore(p: Parameters) extends Module {
 
     regfile.io.writeData(i).valid := csr0Valid ||
                                      alu(i).io.rd.valid || bru(i).io.rd.valid ||
-                                     (if (p.enableVector) {
-                                        io.vcore.get.rd(i).valid
-                                      } else { false.B }) ||
                                      rvvCoreRdValid
 
     regfile.io.writeData(i).bits.addr :=
         MuxOR(csr0Valid, csr0Addr) |
         MuxOR(alu(i).io.rd.valid, alu(i).io.rd.bits.addr) |
         MuxOR(bru(i).io.rd.valid, bru(i).io.rd.bits.addr) |
-        (if (p.enableVector) {
-           MuxOR(io.vcore.get.rd(i).valid, io.vcore.get.rd(i).bits.addr)
-         } else { false.B }) |
         rvvCoreRdAddr
 
     regfile.io.writeData(i).bits.data :=
         MuxOR(csr0Valid, csr0Data) |
         MuxOR(alu(i).io.rd.valid, alu(i).io.rd.bits.data) |
         MuxOR(bru(i).io.rd.valid, bru(i).io.rd.bits.data) |
-        (if (p.enableVector) {
-           MuxOR(io.vcore.get.rd(i).valid, io.vcore.get.rd(i).bits.data)
-         } else { false.B }) |
         rvvCoreRdData
 
-    if (p.enableVector) {
+    if (p.enableRvv) {
       assert((csr0Valid +&
               alu(i).io.rd.valid +& bru(i).io.rd.valid +&
-              io.vcore.get.rd(i).valid) <= 1.U)
+              io.rvvcore.get.rd(i).valid) <= 1.U)
     } else {
-      if (p.enableRvv) {
-        assert((csr0Valid +&
-                alu(i).io.rd.valid +& bru(i).io.rd.valid +&
-                io.rvvcore.get.rd(i).valid) <= 1.U)
-      } else {
-        assert((csr0Valid +&
-               alu(i).io.rd.valid +& bru(i).io.rd.valid) <= 1.U)
-      }
+      assert((csr0Valid +&
+             alu(i).io.rd.valid +& bru(i).io.rd.valid) <= 1.U)
     }
   }
 
@@ -385,9 +349,14 @@ class SCore(p: Parameters) extends Module {
       fRegfile.get.io.dm_write_valid.get := io.dm.get.float_rd.get.valid
     }
 
+    // TODO(derekjchow): Stub-off scalar fp writeback
+    if (p.enableRvv) {
+      io.rvvcore.get.async_frd.ready := false.B
+    }
 
     floatCore.get.io.inst <> dispatch.io.float.get
     dispatch.io.fscoreboard.get := fRegfile.get.io.scoreboard
+    dispatch.io.csrFrm.get := csr.io.float.get.out.frm
     floatCore.get.io.csr <> csr.io.float.get
     floatCore.get.io.rs1 := regfile.io.readData(0)
     floatCore.get.io.rs2 := regfile.io.readData(1)
@@ -396,14 +365,12 @@ class SCore(p: Parameters) extends Module {
     floatCore.get.io.lsu_rd.bits.addr := lsu.io.rd_flt.bits.addr
     floatCore.get.io.lsu_rd.bits.data := lsu.io.rd_flt.bits.data
 
-    if (p.useRetirementBuffer) {
-      retirement_buffer.get.io.writeAddrFloat.get := dispatch.io.rdMark_flt.get
-      (0 until 2).foreach(i => {
-        retirement_buffer.get.io.writeDataFloat.get(i).valid := fRegfile.get.io.write_ports(i).valid
-        retirement_buffer.get.io.writeDataFloat.get(i).bits.addr := fRegfile.get.io.write_ports(i).addr
-        retirement_buffer.get.io.writeDataFloat.get(i).bits.data := fRegfile.get.io.write_ports(i).data.asWord
-      })
-    }
+    rob_io.writeAddrFloat.get := dispatch.io.rdMark_flt.get
+    (0 until 2).foreach(i => {
+      rob_io.writeDataFloat.get(i).valid := fRegfile.get.io.write_ports(i).valid
+      rob_io.writeDataFloat.get(i).bits.addr := fRegfile.get.io.write_ports(i).addr
+      rob_io.writeDataFloat.get(i).bits.data := fRegfile.get.io.write_ports(i).data.asWord
+    })
   }
 
   val mluDvuOffset = p.instructionLanes
@@ -425,9 +392,7 @@ class SCore(p: Parameters) extends Module {
   regfile.io.writeData(lsuOffset).valid := lsu.io.rd.valid
   regfile.io.writeData(lsuOffset).bits.addr  := lsu.io.rd.bits.addr
   regfile.io.writeData(lsuOffset).bits.data  := lsu.io.rd.bits.data
-  // Mask LSU based on fault for LsuV2 only
-  regfile.io.writeMask(lsuOffset).valid := (
-      if (p.useLsuV2) { lsu.io.fault.valid } else { false.B })
+  regfile.io.writeMask(lsuOffset).valid := lsu.io.fault.valid
 
   val writeMask = bru.map(_.io.taken.valid).scan(false.B)(_||_)
   for (i <- 0 until p.instructionLanes) {
@@ -435,13 +400,6 @@ class SCore(p: Parameters) extends Module {
   }
   if (p.useDebugModule) {
     regfile.io.debugWriteValid.get := io.dm.get.scalar_rd.valid
-  }
-
-  // ---------------------------------------------------------------------------
-  // Vector Extension
-  if (p.enableVector) {
-    io.vcore.get.vinst <> dispatch.io.vinst.get
-    io.vcore.get.rs := regfile.io.readData
   }
 
   // ---------------------------------------------------------------------------
@@ -455,16 +413,40 @@ class SCore(p: Parameters) extends Module {
 
     // Register inputs
     io.rvvcore.get.rs := regfile.io.readData
+    // Floating point register inputs. Stub-off if unused.
+    if (p.enableFloat) {
+      io.rvvcore.get.frs(0) := fRegfile.get.io.read_ports(0).data.asWord
+      for (i <- 1 until p.instructionLanes) {
+        io.rvvcore.get.frs(i) := 0.U
+      }
+    } else {
+      for (i <- 0 until p.instructionLanes) {
+        io.rvvcore.get.frs(i) := 0.U
+      }
+    }
 
     io.rvvcore.get.csr.vstart_write <> csr.io.rvv.get.vstart_write
     io.rvvcore.get.csr.vxrm_write <> csr.io.rvv.get.vxrm_write
     io.rvvcore.get.csr.vxsat_write <> csr.io.rvv.get.vxsat_write
+    io.rvvcore.get.csr.frm := csr.io.rvv.get.frm
     csr.io.rvv.get.vstart := io.rvvcore.get.csr.vstart
     csr.io.rvv.get.vl := io.rvvcore.get.configState.bits.vl
     csr.io.rvv.get.vtype := io.rvvcore.get.configState.bits.vtype
     csr.io.rvv.get.vxrm := io.rvvcore.get.csr.vxrm
     csr.io.rvv.get.vxsat := io.rvvcore.get.csr.vxsat
   }
+  val isBranching = bru.map(_.io.taken.valid).reduce(_||_)
+  val hasFetchedInstructions = fetch.io.inst.lanes.map(_.valid).reduce(_||_)
+  val floatIdle = if (p.enableFloat) {fRegfile.get.io.scoreboard === 0.U} else {true.B}
+  val rvvIdle = if (p.enableRvv) {io.rvvcore.get.rvv_idle} else {true.B}
+  // Scalar and float arithmetics don't actually trap, we're just trying to be precise here.
+  fault_manager.io.in.fetchFault := fetch.io.fault &&
+      !isBranching &&  // Branches and jumps
+      (regfile.io.scoreboard.regd === 0.U) &&  // Pending scalar operation
+      floatIdle &&  // Pending float operation
+      rvvIdle &&  // Could have vill
+      !lsu.io.active &&  // Could fault
+      !hasFetchedInstructions
 
   // ---------------------------------------------------------------------------
   // Fetch Bus
@@ -475,22 +457,19 @@ class SCore(p: Parameters) extends Module {
   // Arbitrate ready
   lsu.io.ibus.ready := Mux(lsu.io.ibus.valid, io.ibus.ready, false.B)
   fetch.io.ibus.ready := Mux(lsu.io.ibus.valid, false.B, io.ibus.ready)
+  // Arbitrate error
+  fetch.io.ibus.fault := Mux(lsu.io.ibus.valid, MakeInvalid(new FaultInfo(p)), io.ibus.fault)
   // Broadcast rdata
   lsu.io.ibus.rdata := io.ibus.rdata
   fetch.io.ibus.rdata := io.ibus.rdata
 
-  // Tie-off ibus faults in fetch/lsu (unused)
-  fetch.io.ibus.fault := MakeInvalid(new FaultInfo(p))
+  // Tie-off ibus faults in lsu (unused)
   lsu.io.ibus.fault := MakeInvalid(new FaultInfo(p))
 
   // ---------------------------------------------------------------------------
   // Local Data Bus Port
   io.dbus <> lsu.io.dbus
   io.ebus <> lsu.io.ebus
-
-  if (p.enableVector) {
-    io.vldst.get := lsu.io.vldst
-  }
 
   // ---------------------------------------------------------------------------
   // Scalar logging interface
@@ -559,11 +538,11 @@ class SCore(p: Parameters) extends Module {
     }
   }
 
+  io.debug.rb := rob_io.debug
   if (p.useRetirementBuffer) {
-    io.debug.rb.get := retirement_buffer.get.io.debug
     val rvvi = Module(new RvviTrace(p))
-    rvvi.io.rb := retirement_buffer.get.io.debug
-    rvvi.io.csr := csr.io.trace.get
+    rvvi.io.rb := rob_io.debug
+    rvvi.io.csr := csr.io.trace
   }
 }
 

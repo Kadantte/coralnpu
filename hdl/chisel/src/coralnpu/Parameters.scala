@@ -40,18 +40,24 @@ def contains(addr: UInt): Bool = {
 
 object MemoryRegions {
   val default = Seq(
-    new MemoryRegion(0x00000, 0x2000, MemoryRegionType.IMEM), // ITCM
-    new MemoryRegion(0x10000, 0x8000, MemoryRegionType.DMEM), // DTCM
-    new MemoryRegion(0x30000, 0x1000, MemoryRegionType.Peripheral), // CSR
+    new MemoryRegion(0x0000000, 0x00002000, MemoryRegionType.IMEM), // ITCM
+    new MemoryRegion(0x0010000, 0x00008000, MemoryRegionType.DMEM), // DTCM
+    new MemoryRegion(0x0030000, 0x00001000, MemoryRegionType.Peripheral), // CSR
   )
-  val tcmHighmem = Seq(
-    new MemoryRegion(0x000000, 0x100000, MemoryRegionType.IMEM), // ITCM
-    new MemoryRegion(0x100000, 0x100000, MemoryRegionType.DMEM), // DTCM
-    new MemoryRegion(0x200000, 0x1000, MemoryRegionType.Peripheral), // CSR
+  def highmem(itcmSizeKBytes: Int, dtcmSizeKBytes: Int) = Seq(
+    // The DTCM and CSR base addresses are deliberately offset in `highmem`
+    // to allow for varying size up to 1MB without affecting existing memory base addresses
+    new MemoryRegion(0x00000000, itcmSizeKBytes * 1024, MemoryRegionType.IMEM), // ITCM
+    new MemoryRegion(0x00100000, dtcmSizeKBytes * 1024, MemoryRegionType.DMEM), // DTCM
+    new MemoryRegion(0x00200000, 0x00001000, MemoryRegionType.Peripheral), // CSR
   )
 }
 
 object Parameters {
+  val itcmSizeKBytesDefault = 8     // default itcm size for current IP design
+  val dtcmSizeKBytesDefault = 32    // default dtcm size for current IP design
+  val itcmSizeKBytesHighmem = 1024
+  val dtcmSizeKBytesHighmem = 1024
   def apply(): Parameters = {
     return new Parameters()
   }
@@ -61,55 +67,20 @@ object Parameters {
 }
 
 class Parameters(var m: Seq[MemoryRegion] = Seq(), val hartId: Int = 0) {
-  case object Core {
-    val tiny = 0
-    val little = 1
-    val big = 2
-  }
-
-  // Vector Length (register-file and compute).
-  // 128 = faster builds, but not production.
-  val vectorBits = sys.env.get("CORALNPU_SIMD").getOrElse("256").toInt
-  assert(vectorBits == 512 || vectorBits == 256 || vectorBits == 128)
-
-  val core = vectorBits match {
-    case 128 => Core.tiny
-    case 256 => Core.little
-    case 512 => Core.big
-  }
-
   // Machine.
   val programCounterBits = 32
   val instructionBits = 32
   val instructionLanes = 4
 
-  val vectorCountBits = log2Ceil(vectorBits / 8) + 1 + 2  // +2 stripmine
-
-  // Enable Vector
-  var enableVector = true
-  val vectorAluCount = 2
-  val vectorReadPorts = (vectorAluCount * 3) + 1
-  val vectorWritePorts = 6
-  val vectorWhintPorts = 4
-  val vectorScalarPorts = 2
-
-  // Vector queue.
-  val vectorFifoDepth = 16
-
   // Enable extra logic for verification purposes.
   var enableVerification = false
 
-  // Enable RVV. This differs from "Vector" in that it conforms to the RVV1.0
-  // spec instead of the CoralNPU Custom vector ISA.
+  // Enable RVV. This conforms to the RVV1.0 specification.
   var enableRvv = false
   val rvvVlen = 128
   def rvvVlenb: Int = { rvvVlen / 8 }
 
-  // Dispatch unit
-  var enableDispatchV2 = false
-  def useDispatchV2: Boolean = { enableRvv || enableDispatchV2 }
-
-  def useRetirementBuffer: Boolean = { useDispatchV2 && enableVerification }
+  def useRetirementBuffer: Boolean = { enableVerification }
 
   // Scalar Floating point
   var enableFloat = false
@@ -145,16 +116,16 @@ class Parameters(var m: Seq[MemoryRegion] = Seq(), val hartId: Int = 0) {
 
   // Scalar Core Load Store Unit bus.
   val lsuAddrBits = 32  // do not change
-  var lsuDataBits = vectorBits
+  var lsuDataBits = 256
   def lsuDataBytes: Int = { lsuDataBits / 8 }
   val lsuDelayPipelineLen = 1
   def dbusSize: Int = { log2Ceil(lsuDataBits / 8) + 1 }
-  def useLsuV2: Boolean = { enableRvv }
   var enableDebug = false
-  def useDebugModule: Boolean = { useDispatchV2 && enableDebug }
+  def useDebugModule: Boolean = { enableDebug }
 
   // TCM Size Configuration
-  var tcmHighmem = false
+  var itcmSizeKBytes = Parameters.itcmSizeKBytesDefault
+  var dtcmSizeKBytes = Parameters.dtcmSizeKBytesDefault
 
   // [External] Core AXI interface.
   val axiSysIdBits = 7
@@ -185,7 +156,7 @@ class Parameters(var m: Seq[MemoryRegion] = Seq(), val hartId: Int = 0) {
   val itcmMemoryFile = ""
 
   val csrInCount = 13
-  val csrOutCount = 8
+  val csrOutCount = 9
 }
 
 import scala.reflect.runtime.{universe => ru}
@@ -221,7 +192,6 @@ object EmitParametersHeader {
     // TODO(atv): See if we can improve the reflection above to execute
     // the methods for our dynamic parameters.
     builder = builder.append(s"#define KP_dbusSize ${p.dbusSize}\n")
-    builder = builder.append(s"#define KP_useDispatchV2 ${p.useDispatchV2}\n")
     builder = builder.append(s"#define KP_useRetirementBuffer ${p.useRetirementBuffer}\n")
     builder = builder.append(s"#define KP_retirementBufferIdxWidth ${p.retirementBufferIdxWidth}\n")
     builder = builder.append(s"#define KP_useDebugModule ${p.useDebugModule}\n")

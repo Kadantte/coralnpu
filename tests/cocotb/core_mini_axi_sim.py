@@ -20,6 +20,7 @@ import tqdm
 import random
 
 from coralnpu_test_utils.core_mini_axi_interface import AxiBurst, AxiResp,CoreMiniAxiInterface
+from coralnpu_test_utils.sim_test_fixture import Fixture
 from bazel_tools.tools.python.runfiles import runfiles
 
 
@@ -187,15 +188,22 @@ async def core_mini_axi_riscv_tests(dut):
   cocotb.start_soon(core_mini_axi.clock.start())
   r = runfiles.Create()
 
-  riscv_test_path = r.Rlocation("coralnpu_hw/tests/cocotb/riscv-tests")
-  riscv_test_elfs = [os.path.join(riscv_test_path, f) for f in os.listdir(riscv_test_path) if f.endswith(".elf")]
-  for elf in tqdm.tqdm(riscv_test_elfs):
-    with open(elf, "rb") as f:
-      await core_mini_axi.reset()
-      entry_point = await core_mini_axi.load_elf(f)
-      await core_mini_axi.execute_from(entry_point)
-      await core_mini_axi.wait_for_halted()
-      assert core_mini_axi.dut.io_fault.value == 0
+  riscv_test_path_template = "coralnpu_hw/third_party/riscv-tests/copy_riscv_tests_rv32{suffix}/riscv_tests_rv32{suffix}/isa"
+  riscv_test_suites = ['ui', 'um', 'uzbb', 'uf']
+  riscv_test_paths = [r.Rlocation(riscv_test_path_template.format(suffix=suffix)) for suffix in riscv_test_suites]
+  riscv_test_elfs = [os.path.join(riscv_test_path, f) for riscv_test_path in riscv_test_paths for f in os.listdir(riscv_test_path) if not f.endswith(".dump")]
+  with tqdm.tqdm(riscv_test_elfs) as t:
+    for elf in t:
+      t.set_postfix({"binary": os.path.basename(elf)})
+      if 'fence_i' in elf:
+        # This one likes to jump into DTCM. Can probably patch the ASM
+        continue
+      with open(elf, "rb") as f:
+        await core_mini_axi.reset()
+        entry_point = await core_mini_axi.load_elf(f)
+        await core_mini_axi.execute_from(entry_point)
+        await core_mini_axi.wait_for_halted(timeout_cycles=100_000)
+        assert core_mini_axi.dut.io_fault.value == 0
 
 @cocotb.test()
 async def core_mini_axi_riscv_dv(dut):
@@ -253,7 +261,7 @@ async def core_mini_axi_csr_test(dut):
   # Read invalid CSRs, expect error response
   for i in range(3, 0x100 // 4):
     misc_csr_rdata = await core_mini_axi.read_word(0x30000 + (4 * i), expected_resp=AxiResp.SLVERR)
-  for i in range(8, 0x2000 // 4):
+  for i in range(9, 0x2000 // 4):
     misc_csr_rdata = await core_mini_axi.read_word(0x30100 + (4 * i), expected_resp=AxiResp.SLVERR)
 
 @cocotb.test()
@@ -275,6 +283,26 @@ async def core_mini_axi_exceptions_test(dut):
         await core_mini_axi.execute_from(entry_point)
         await core_mini_axi.wait_for_halted()
         assert core_mini_axi.dut.io_fault.value == 0
+
+@cocotb.test()
+async def rvv_exceptions_test(dut):
+  if "Rvv" not in dut._name:
+    dut._log.info("Skipping rvv_exceptions_test on non-RVV core")
+    return
+
+  core_mini_axi = CoreMiniAxiInterface(dut)
+  await core_mini_axi.init()
+  await core_mini_axi.reset()
+  cocotb.start_soon(core_mini_axi.clock.start())
+  r = runfiles.Create()
+
+  elf = r.Rlocation("coralnpu_hw/tests/cocotb/vector_store_fault.elf")
+  with open(elf, "rb") as f:
+    await core_mini_axi.reset()
+    entry_point = await core_mini_axi.load_elf(f)
+    await core_mini_axi.execute_from(entry_point)
+    await core_mini_axi.wait_for_halted(timeout_cycles=50000)
+    assert core_mini_axi.dut.io_fault.value == 0
 
 @cocotb.test()
 async def core_mini_axi_coralnpu_isa_test(dut):
@@ -367,3 +395,66 @@ async def core_mini_axi_float_csr_test(dut):
 
     await core_mini_axi.wait_for_halted()
     assert core_mini_axi.dut.io_fault.value == 0
+
+@cocotb.test()
+async def unreachable_prefetch_fault(dut):
+  fixture = await Fixture.Create(dut)
+  r = runfiles.Create()
+  cases = [
+    ('mpause', 0),
+    ('jalr', 0),
+    ('branch_forward', 0),
+    ('branch_backward', 0),
+    ('ebreak', 0),
+    ('ecall', 1),
+    # ('vill1', 1),
+    ('vill2', 1),
+    ('unimp', 1),
+    ('load', 1),
+    ('store', 1),
+    ('csrr', 1),
+    ('csrw', 1),
+  ]
+  await fixture.load_elf_and_lookup_symbols(
+      r.Rlocation('coralnpu_hw/tests/cocotb/unreachable_prefetch_fault.elf'),
+      ['impl', 'iaf_count', 'other_count'] + [c for c, _ in cases] + ['wfi'],
+  )
+
+  for c, expected_exceptions in tqdm.tqdm(cases):
+    await fixture.write_ptr('impl', c)
+    await fixture.run_to_halt()
+    iaf_count = (await fixture.read_word('iaf_count')).view(np.int32)[0]
+    other_count = (await fixture.read_word('other_count')).view(np.uint32)[0]
+    assert iaf_count == 0
+    assert other_count == expected_exceptions
+
+  for c in tqdm.tqdm(['wfi']):
+    await fixture.write_ptr('impl', c)
+    await fixture.core_mini_axi.execute_from(fixture.entry_point)
+    await fixture.core_mini_axi.wait_for_wfi()
+    iaf_count = (await fixture.read_word('iaf_count')).view(np.int32)[0]
+    other_count = (await fixture.read_word('other_count')).view(np.uint32)[0]
+    assert iaf_count == 0
+    assert other_count == 0
+
+@cocotb.test()
+async def core_mini_axi_frm_test(dut):
+  """Tests the FRM CSR with valid and invalid values."""
+  fixture = await Fixture.Create(dut)
+  r = runfiles.Create()
+
+  await fixture.load_elf_and_lookup_symbols(
+      r.Rlocation("coralnpu_hw/tests/cocotb/frm_test.elf"),
+      ['frm', 'result', 'faulted', 'mcause', 'mtval'],
+  )
+
+  for mode in range(8):
+    await fixture.write('frm', np.array([mode], dtype=np.uint32))
+    valid_mode = (mode <= 4)
+    await fixture.run_to_halt()
+    faulted = (await fixture.read('faulted', 4)).view(np.uint32)
+    mcause = (await fixture.read('mcause', 4)).view(np.uint32)
+    if valid_mode:
+      assert faulted == 0
+    else:
+      assert(mcause == 0x2)

@@ -59,17 +59,21 @@ object MakeValid {
     )
   }
 
+  def apply[T <: Data](valid: Bool, bits: T, bitsWhenInvalid: T): ValidIO[T] = {
+    // Allowing a different value when invalid makes it easier to either keep
+    // the bits (in a reg) or zero them.
+    apply(valid, Mux(valid, bits, bitsWhenInvalid))
+  }
+
   def apply[T <: Data](bits: T): ValidIO[T] = {
     apply(true.B, bits)
   }
 }
 
 object MakeInvalid {
-  def apply[T <: Data](gen: T): ValidIO[T] = MakeWireBundle[ValidIO[T]](
-    Valid(gen),
-    _.valid -> false.B,
-    _.bits -> 0.U.asTypeOf(gen),
-  )
+  def apply[T <: Data](gen: T): ValidIO[T] = {
+    MakeValid[T](false.B, 0.U.asTypeOf(gen))
+  }
 }
 
 object MakeDecoupled {
@@ -86,11 +90,9 @@ object MakeDecoupled {
 // Gate the bits of an interface based on it's validity bit. This prevents
 // invalid data from propagating down stream, thus reducing dynamic power
 object ForceZero {
-  def apply[T <: Data](input: ValidIO[T]): ValidIO[T] = MakeWireBundle[ValidIO[T]](
-    chiselTypeOf(input),
-    _.valid -> input.valid,
-    _.bits  -> Mux(input.valid, input.bits, 0.U.asTypeOf(input).bits),
-  )
+  def apply[T <: Data](input: ValidIO[T]): ValidIO[T] = {
+    MakeValid[T](input.valid, input.bits, 0.U.asTypeOf(input.bits))
+  }
 }
 
 object Clz {
@@ -145,7 +147,9 @@ object RotateVectorLeft {
   def apply[T <: Data](data: Vec[T], shift: UInt): Vec[T] = {
     val elemSize = data(0).asUInt.getWidth
     val rotated = data.asUInt.rotateLeft(shift * elemSize.U)
-    rotated.asTypeOf(chiselTypeOf(data))
+    suppressEnumCastWarning {
+      rotated.asTypeOf(chiselTypeOf(data))
+    }
   }
 }
 
@@ -155,7 +159,9 @@ object RotateVectorRight {
   def apply[T <: Data](data: Vec[T], shift: UInt): Vec[T] = {
     val elemSize = data(0).asUInt.getWidth
     val rotated = data.asUInt.rotateRight(shift * elemSize.U)
-    rotated.asTypeOf(chiselTypeOf(data))
+    suppressEnumCastWarning {
+      rotated.asTypeOf(chiselTypeOf(data))
+    }
   }
 }
 
@@ -202,6 +208,12 @@ class LoopingCounter(w: Width) extends Bundle {
         _.curr -> Mux(isFull(), 0.U, curr + 1.U),
         _.max -> max,
     )
+
+    def reset(): LoopingCounter = MakeWireBundle[LoopingCounter](
+        new LoopingCounter(Width(max.getWidth)),
+        _.curr -> 0.U,
+        _.max -> max,
+    )
 }
 
 object LoopingCounter {
@@ -210,4 +222,22 @@ object LoopingCounter {
         _.curr -> 0.U,
         _.max -> max,
     )
+}
+
+// A variant on Mux1H, that accepts a "up-to-one-hot" input. This variation
+// allows the case where all inputs can be false. Internally, it calls Mux1H but
+// with a "default case" appended to the specified selectors.
+// Usage of MuxUpTo1H is preferrable to MuxCase, as MuxUpTo1H can generate a
+// Mux tree, which is faster the the chain generated MuxCase or PriorityMux.
+object MuxUpTo1H {
+  def apply[T <: Data](defaultVal: T, sel: Seq[Bool], data: Seq[T]): T = {
+    assert(PopCount(sel) <= 1.U)
+
+    val defaultSel = !sel.reduce(_||_)
+    Mux1H(sel ++ Seq(defaultSel), data ++ Seq(defaultVal))
+  }
+
+  def apply[T <: Data](defaultVal: T, sel: Seq[(Bool, T)]): T = {
+    apply(defaultVal, sel.map(_._1), sel.map(_._2))
+  }
 }

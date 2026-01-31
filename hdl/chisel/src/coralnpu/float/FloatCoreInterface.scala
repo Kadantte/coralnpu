@@ -50,9 +50,36 @@ class FloatInstruction extends Bundle {
     val pc = UInt(32.W)
     val scalar_rd = Bool()
     val scalar_rs1 = Bool()
+    val float_rs1 = Bool()
     val rd = UInt(5.W)
     val uses_rs3 = Bool()
     val uses_rs2 = Bool()
+
+    def valid_frm(csr_rm: UInt): Bool = {
+      assert(csr_rm.getWidth == 3)
+      (rm <= 4.U) ||                          // Instruction FRM is valid
+      ((rm === "b111".U) && (csr_rm <= 4.U)) // CSR is valid
+    }
+
+    def requires_frm(): Bool = {
+      opcode.isOneOf(FloatOpcode.MADD,
+                     FloatOpcode.MSUB,
+                     FloatOpcode.NMSUB,
+                     FloatOpcode.NMADD) ||
+      ((opcode === FloatOpcode.OPFP) && (
+        (funct5 === "b00000".U) || // fadd
+        (funct5 === "b00001".U) || // fsub
+        (funct5 === "b00010".U) || // fmul
+        (funct5 === "b00011".U) || // fdiv
+        (funct5 === "b00100".U) || // fsqrt
+        (funct5 === "b11010".U)    // fcvt (both f->x and x->f)
+      ))
+    }
+
+    // Validates that the instruction has a valid FRM, or does not depend on it.
+    def validate_csrfrm(csr_rm: UInt): Bool = {
+      !requires_frm() || valid_frm(csr_rm)
+    }
 }
 
 object FloatInstruction {
@@ -103,6 +130,8 @@ object FloatInstruction {
       "b11010".U -> false.B, // FCVT.S.W
       "b01011".U -> false.B, // FSQRT.W
     )))
+    // All float instructions EXCEPT loads, stores, fmv.w.x, and fcvt.s.w, use float rs1.
+    val float_rs1 = !opcode.bits.isOneOf(FloatOpcode.STOREFP, FloatOpcode.LOADFP) && !scalar_rs1
 
     MakeWireBundle[ValidIO[FloatInstruction]](
       Valid(new FloatInstruction),
@@ -118,6 +147,7 @@ object FloatInstruction {
       _.bits.pc -> addr,
       _.bits.scalar_rd -> scalar_rd,
       _.bits.scalar_rs1 -> scalar_rs1,
+      _.bits.float_rs1 -> float_rs1,
       _.bits.rd -> rd,
       _.bits.uses_rs3 -> uses_rs3,
       _.bits.uses_rs2 -> uses_rs2,

@@ -30,6 +30,65 @@ def coralnpu_repos():
     )
 
     http_archive(
+        name = "com_google_absl",
+        urls = ["https://github.com/abseil/abseil-cpp/releases/download/20250127.1/abseil-cpp-20250127.1.tar.gz"],
+        sha256 = "b396401fd29e2e679cace77867481d388c807671dc2acc602a0259eeb79b7811",
+        strip_prefix = "abseil-cpp-20250127.1",
+    )
+
+    http_archive(
+        name = "rules_java",
+        urls = ["https://github.com/bazelbuild/rules_java/archive/981f06c3d2bd10225e85209904090eb7b5fb26bd.zip"],
+        sha256 = "7979ece89e82546b0dcd1dff7538c34b5a6ebc9148971106f0e3705444f00665",
+        strip_prefix = "rules_java-981f06c3d2bd10225e85209904090eb7b5fb26bd",
+    )
+
+    http_archive(
+        name = "rules_pkg",
+        urls = ["https://mirror.bazel.build/github.com/bazelbuild/rules_pkg/releases/download/0.7.0/rules_pkg-0.7.0.tar.gz", "https://github.com/bazelbuild/rules_pkg/releases/download/0.7.0/rules_pkg-0.7.0.tar.gz"],
+        sha256 = "8a298e832762eda1830597d64fe7db58178aa84cd5926d76d5b744d6558941c2",
+    )
+
+    http_archive(
+        name = "rules_proto",
+        urls = ["https://github.com/bazelbuild/rules_proto/archive/f7a30f6f80006b591fa7c437fe5a951eb10bcbcf.zip"],
+        sha256 = "a4382f78723af788f0bc19fd4c8411f44ffe0a72723670a34692ffad56ada3ac",
+        strip_prefix = "rules_proto-f7a30f6f80006b591fa7c437fe5a951eb10bcbcf",
+    )
+
+    http_archive(
+        name = "rules_python",
+        sha256 = "9d04041ac92a0985e344235f5d946f71ac543f1b1565f2cdbc9a2aaee8adf55b",
+        strip_prefix = "rules_python-0.26.0",
+        url = "https://github.com/bazelbuild/rules_python/archive/refs/tags/0.26.0.tar.gz",
+        patches = ["@coralnpu_hw//rules:rules_python_airgap.patch"],
+        patch_args = ["-p0"],
+    )
+
+    http_archive(
+        name = "pybind11_bazel",
+        urls = ["https://github.com/pybind/pybind11_bazel/releases/download/v2.11.1/pybind11_bazel-2.11.1.tar.gz"],
+        strip_prefix = "pybind11_bazel-2.11.1",
+        sha256 = "e8355ee56c2ff772334b4bfa22be17c709e5573f6d1d561c7176312156c27bd4",
+    )
+
+def coralnpu_repos2():
+    """Coralnpu repos are split into two functions; this is to import repositories in order"""
+
+    http_archive(
+        name = "pybind11",
+        build_file = "@pybind11_bazel//:pybind11.BUILD",
+        strip_prefix = "pybind11-3.0.1",
+        urls = ["https://github.com/pybind/pybind11/archive/v3.0.1.zip"],
+        sha256 = "20fb420fe163d0657a262a8decb619b7c3101ea91db35f1a7227e67c426d4c7e",
+    )
+    http_archive(
+        name = "pybind11_abseil",
+        strip_prefix = "pybind11_abseil-54b34dd0e8afb8a4febb9508c69410e708b43515",
+        urls = ["https://github.com/pybind/pybind11_abseil/archive/54b34dd0e8afb8a4febb9508c69410e708b43515.tar.gz"],
+        sha256 = "26328a74f367208ae8d490dc640030111df4ba0869619c6445bb4a1c5964e2a7",
+    )
+    http_archive(
         name = "rules_hdl",
         sha256 = "1b560fe7d4100486784d6f2329e82a63dd37301e185ba77d0fd69b3ecc299649",
         strip_prefix = "bazel_rules_hdl-7a1ba0e8d229200b4628e8a676917fc6b8e165d1",
@@ -43,6 +102,7 @@ def coralnpu_repos():
             "@coralnpu_hw//external:0004-More-jobs-for-cocotb.patch",
             "@coralnpu_hw//external:0005-Use-num_failed-for-exit-code.patch",
             "@coralnpu_hw//external:0006-Separate-build-from-test-for-Verilator.patch",
+            "@coralnpu_hw//external:0007-Suppress-skywater-pdk-loading.patch",
         ],
         patch_args = ["-p1"],
     )
@@ -69,15 +129,6 @@ def coralnpu_repos():
         urls = ["https://repo1.maven.org/maven2/org/chipsalliance/llvm-firtool/1.114.0/llvm-firtool-1.114.0.jar"],
         build_file = "@coralnpu_hw//third_party/llvm-firtool:BUILD.bazel",
         sha256 = "f93a831e6b5696df2e3327626df3cc183e223bf0c9c0fddf9ae9e51f502d0492",
-    )
-
-    http_archive(
-        name = "com_github_grpc_grpc",
-        urls = [
-            "https://github.com/grpc/grpc/archive/v1.58.0.tar.gz",
-        ],
-        strip_prefix = "grpc-1.58.0",
-        sha256 = "ec64fdab22726d50fc056474dd29401d914cc616f53ab8f2fe4866772881d581",
     )
 
     http_archive(
@@ -108,19 +159,25 @@ exports_files(["diplomacy/src/diplomacy/nodes/HeterogeneousBag.scala"])
         """,
     )
 
-def renode_repos():
     http_archive(
-        name = "renode",
-        sha256 = "ca98b8df2ed09e225b72f35c616c85207e451d8a4b00d96594064e5065493cf1",
-        strip_prefix = "renode_1.15.2_source",
-        urls = ["https://github.com/renode/renode/releases/download/v1.15.2/renode_1.15.2_source.tar.xz"],
-        build_file = "@coralnpu_hw//third_party/renode:BUILD.bazel",
+        name = "riscv-tests",
+        urls = ["https://github.com/riscv-software-src/riscv-tests/archive/fd4e6cdd033d9075632be9dd207c848181ca474c.zip"],
+        sha256 = "e7d84eaa149b57c0e5ff69a76c80f35f4ee64c5dc985dbba5c287adf8b56ec5d",
+        strip_prefix = "riscv-tests-fd4e6cdd033d9075632be9dd207c848181ca474c",
         patches = [
-            "@coralnpu_hw//third_party/renode:0001-Tweaks-to-AXI.patch",
-            "@coralnpu_hw//third_party/renode:0002-AXI-S-fixups.patch",
-            "@coralnpu_hw//third_party/renode:0003-Invert-AXI-reset-polarity.patch",
+            "@coralnpu_hw//third_party/riscv-tests:0001-Find-env-from-environment.patch",
         ],
         patch_args = ["-p1"],
+        build_file_content = """
+package(default_visibility = ["//visibility:public"])
+exports_files(glob(["**"]))
+filegroup(
+    name = "all_srcs",
+    srcs = glob([
+        "**/*",
+    ]),
+)
+        """,
     )
 
 def cvfpu_repos():
@@ -171,9 +228,9 @@ def rvvi_repos():
 def fpga_repos():
     http_archive(
         name = "lowrisc_opentitan_gh",
-        urls = ["https://github.com/lowRISC/opentitan/archive/1b1945fd76799666156f817e163222725c518c59.zip"],
-        sha256 = "b881378cdffee2284a88c2032c9fb13e68c889f1cac38cf715b0cff7b40fcf7e",
-        strip_prefix = "opentitan-1b1945fd76799666156f817e163222725c518c59",
+        urls = ["https://github.com/lowRISC/opentitan/archive/0e3cf62211004443d6d29f8f6120882376da499a.zip"],
+        sha256 = "5de3d4ba7a2d02ea58f189f0d9bc46051368dc138a7f8c0fb89af78dcd43a0f8",
+        strip_prefix = "opentitan-0e3cf62211004443d6d29f8f6120882376da499a",
         patches = [
             "@coralnpu_hw//fpga:0001-Export-hw-ip_templates.patch",
         ],
@@ -200,18 +257,17 @@ def tflite_repos():
         url = "https://github.com/hedronvision/bazel-compile-commands-extractor/archive/1266d6a25314d165ca78d0061d3399e909b7920e.tar.gz",
     )
 
-    maybe(
-        http_archive,
-        name = "rules_python",
-        sha256 = "9d04041ac92a0985e344235f5d946f71ac543f1b1565f2cdbc9a2aaee8adf55b",
-        strip_prefix = "rules_python-0.26.0",
-        url = "https://github.com/bazelbuild/rules_python/archive/refs/tags/0.26.0.tar.gz",
+def mpact_repos():
+    http_archive(
+        name = "com_google_mpact-riscv",
+        sha256 = "01dac9ff9e7ca6a2666bf3c881f12cb146298925658e75fa351cddf06633fb0a",
+        strip_prefix = "mpact-riscv-336067a7ee0a91c2c180b35f3423d664d9045cc2",
+        url = "https://github.com/google/mpact-riscv/archive/336067a7ee0a91c2c180b35f3423d664d9045cc2.tar.gz",
     )
 
-    maybe(
-        http_archive,
-        name = "pybind11_bazel",
-        strip_prefix = "pybind11_bazel-faf56fb3df11287f26dbc66fdedf60a2fc2c6631",
-        urls = ["https://github.com/pybind/pybind11_bazel/archive/faf56fb3df11287f26dbc66fdedf60a2fc2c6631.zip"],
-        sha256 = "a185aa68c93b9f62c80fcb3aadc3c83c763854750dc3f38be1dadcb7be223837",
+    http_archive(
+        name = "coralnpu_mpact",
+        urls = ["https://github.com/google-coral/coralnpu-mpact/archive/430a8d14ad766388ef546a6449bf3a14b3b3f233.tar.gz"],
+        sha256 = "c9a38cfcba293398fc18c2b735b1831ebc99315184667c87f4d995f4933b2814",
+        strip_prefix = "coralnpu-mpact-430a8d14ad766388ef546a6449bf3a14b3b3f233",
     )

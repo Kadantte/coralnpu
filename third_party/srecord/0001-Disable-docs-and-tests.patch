@@ -23,17 +23,17 @@ index ea7f41e..0869c51 100644
  endif()
  
  # Pull in the rest of the pieces
-@@ -50,12 +50,8 @@ add_subdirectory(srec_cat)
- add_subdirectory(srec_cmp)
- add_subdirectory(srec_info)
- 
+@@ -50,12 +50,4 @@ add_subdirectory(srec_cat)
+-add_subdirectory(srec_cmp)
+-add_subdirectory(srec_info)
+-
 -# Tests & support tools
 -enable_testing()
 -add_subdirectory(test)
-+# Tests, documentation disabled for Bazel hermetic build
- 
+-
 -# Documentation & Man Pages
 -add_subdirectory(doc)
++# Tests, documentation disabled for Bazel hermetic build
  
  # Package SRecord
  include(CPack)
@@ -83,4 +83,3 @@ index a3f8a6d..784b8c1 100644
  // Copyright (C) 2019 fenugrec
 -- 
 2.39.5
-

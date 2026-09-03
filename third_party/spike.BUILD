@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@coralnpu_host_cpus//:defs.bzl", "MAKE_JOBS")
 load("@rules_foreign_cc//foreign_cc:configure.bzl", "configure_make")
 
 filegroup(
@@ -21,7 +22,7 @@ filegroup(
 
 configure_make(
     name = "riscv_isa_sim",
-    args = ["-j16"],
+    args = ["-j{}".format(MAKE_JOBS)],
     configure_options = [
         "--enable-commitlog",
         "--with-isa=rv32imf_zve32f_zvl128b_zicsr_zifencei_zbb_zfbfmin_zvfbfa",

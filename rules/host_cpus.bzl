@@ -37,9 +37,20 @@ def _host_cpus_impl(repository_ctx):
     # on big-iron CI hosts, but never above the host's CPU count.
     verilator_threads = min(cpus, 8)
 
-    # `make -j` for Verilator's generated C++ compile benefits from all the
-    # cores it can get. Leave a core for the scheduler on small hosts.
-    make_jobs = max(cpus - 1, 1) if cpus <= 4 else cpus
+    # Check for explicit user override in environment
+    env_jobs = repository_ctx.os.environ.get(
+        "CORALNPU_MAKE_JOBS",
+        repository_ctx.os.environ.get("MAKE_JOBS", ""),
+    )
+    if env_jobs.isdigit() and int(env_jobs) > 0:
+        make_jobs = int(env_jobs)
+    elif cpus <= 4:
+        # Leave a core for the OS on small hosts (e.g. 4 -> 3, 2 -> 1)
+        make_jobs = max(cpus - 1, 1)
+    else:
+        # For workstations (e.g. 12 cores -> 10 jobs) and larger hosts, leave 2
+        # cores free to ensure desktop responsiveness and avoid system starvation.
+        make_jobs = max(cpus - 2, 2)
 
     repository_ctx.file("BUILD.bazel", content = "")
     repository_ctx.file(
@@ -59,5 +70,9 @@ def _host_cpus_impl(repository_ctx):
 host_cpus = repository_rule(
     implementation = _host_cpus_impl,
     doc = "Detects host CPU count and exposes parallelism knobs.",
+    environ = [
+        "CORALNPU_MAKE_JOBS",
+        "MAKE_JOBS",
+    ],
     local = True,
 )

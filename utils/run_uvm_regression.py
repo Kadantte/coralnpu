@@ -218,35 +218,37 @@ def get_tohost_addr(elf_path: str) -> Optional[int]:
     return None
 
 
+def get_simulator_binary_path(simulator: str = "verilator") -> str:
+    if simulator == "vcs":
+        return os.path.abspath("bazel-bin/tests/uvm/uvm_sim_vcs")
+    p1 = os.path.abspath(
+        "bazel-bin/tests/uvm/coralnpu_tb_top_build/coralnpu_tb_top"
+    )
+    if os.path.exists(p1):
+        return p1
+    return os.path.abspath("bazel-bin/tests/uvm/uvm_sim_verilator")
+
+
 def build_simulator(
-    mpact_root: str,
-    simulator: str,
+    mpact_root: str = "",
+    simulator: str = "verilator",
     mpact_riscv_root: Optional[str] = None,
     verilator_bin: Optional[str] = None,
     verilator_root: Optional[str] = None,
     uvm_root: Optional[str] = None
 ) -> bool:
-    logging.info("Building UVM Simulator (simv)...")
-    env = os.environ.copy()
-    env["CORALNPU_MPACT"] = mpact_root
-    if mpact_riscv_root:
-        env["CORALNPU_MPACT_RISCV"] = mpact_riscv_root
-    if verilator_bin:
-        env["VERILATOR"] = verilator_bin
-    if verilator_root:
-        env["VERILATOR_ROOT"] = verilator_root
-        env["VERILATOR_CXX"] = os.environ.get("VERILATOR_CXX", "g++")
-        env["VERILATOR_AR"] = os.environ.get("VERILATOR_AR", "ar")
-        env["VERILATOR_PYTHON3"] = os.environ.get(
-            "VERILATOR_PYTHON3", "python3"
-        )
-    if uvm_root:
-        env["UVM"] = uvm_root
-
-    cmd = ["make", "-C", "tests/uvm", "compile", f"SIMULATOR={simulator}"]
+    logging.info(f"Building UVM Simulator ({simulator}) via Bazel...")
+    target = (
+        "//tests/uvm:uvm_sim_vcs"
+        if simulator == "vcs" else "//tests/uvm:uvm_sim_verilator"
+    )
+    cmd = ["bazel", "build"]
+    if simulator == "vcs":
+        cmd.append("--config=vcs")
+    cmd.append(target)
 
     try:
-        subprocess.run(cmd, check=True, env=env)
+        subprocess.run(cmd, check=True)
         return True
     except subprocess.CalledProcessError as e:
         logging.error(f"Simulator build failed: {e}")
@@ -655,8 +657,12 @@ def run_spike_timeout_check(
 
 
 def run_uvm_batch(
-    cmd: List[str], env: os._Environ, regression_log_path: str, logs_dir: str,
-    test_info_map: Dict
+    cmd: List[str],
+    env: os._Environ,
+    regression_log_path: str,
+    logs_dir: str,
+    test_info_map: Dict,
+    cwd: Optional[str] = None
 ):
     current_target = None
     current_test_log = None
@@ -667,6 +673,8 @@ def run_uvm_batch(
         process = subprocess.Popen(
             cmd,
             env=env,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True
@@ -798,7 +806,7 @@ def run_full_regression(
 
     # Setup output directory
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"uvm_regression_{timestamp}"
+    output_dir = os.path.abspath(f"uvm_regression_{timestamp}")
     logs_dir = os.path.join(output_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
     logging.info(f"Regression results will be stored in: {output_dir}")
@@ -895,19 +903,6 @@ def run_full_regression(
     pending_targets = [t for t, _ in tests_to_run if t in test_info_map]
 
     env = os.environ.copy()
-    env["CORALNPU_MPACT"] = mpact_root
-    if verilator_bin:
-        env["VERILATOR"] = verilator_bin
-    if verilator_root:
-        env["VERILATOR_ROOT"] = verilator_root
-        env["VERILATOR_CXX"] = os.environ.get("VERILATOR_CXX", "g++")
-        env["VERILATOR_AR"] = os.environ.get("VERILATOR_AR", "ar")
-        env["VERILATOR_PYTHON3"] = os.environ.get(
-            "VERILATOR_PYTHON3", "python3"
-        )
-    if uvm_root:
-        env["UVM"] = uvm_root
-
     regression_log_path = os.path.join(logs_dir, "regression.log")
 
     logging.info("--- Starting Batch UVM Regression ---")
@@ -915,6 +910,7 @@ def run_full_regression(
     while pending_targets:
         # Create REGRESSION_LIST for current batch
         batch_list_path = os.path.join(output_dir, "current_batch.txt")
+        batch_test_info_map = {t: test_info_map[t] for t in pending_targets}
         with open(batch_list_path, 'w') as f_list:
             for t in pending_targets:
                 info = test_info_map[t]
@@ -925,14 +921,26 @@ def run_full_regression(
                     )
                 )
 
+        sim_bin = get_simulator_binary_path(simulator)
+        sim_dir = os.path.abspath("./sim_work")
+        os.makedirs(sim_dir, exist_ok=True)
         cmd = [
-            "make", "-C", "tests/uvm", "run", "UVM_VERBOSITY=UVM_LOW",
-            "UVM_TESTNAME=coralnpu_regression_test", f"SIMULATOR={simulator}",
-            f"EXTRA_PLUSARGS=+REGRESSION_LIST={os.path.abspath(batch_list_path)}"
+            sim_bin,
+            "+UVM_TESTNAME=coralnpu_regression_test",
+            "+UVM_VERBOSITY=UVM_LOW",
+            f"+REGRESSION_LIST={os.path.abspath(batch_list_path)}",
+            "+TEST_ELF=dummy",
+            "+TEST_TIMEOUT=100000",
+            "+MISA_VALUE='h40801120'",
         ]
         try:
             results_batch, completed_targets_batch = run_uvm_batch(
-                cmd, env, regression_log_path, logs_dir, test_info_map
+                cmd,
+                env,
+                regression_log_path,
+                logs_dir,
+                batch_test_info_map,
+                cwd=sim_dir
             )
             results.extend(results_batch)
             completed_targets = completed_targets.union(
@@ -941,6 +949,25 @@ def run_full_regression(
         except Exception as e:
             logging.error(f"Batch execution failed: {e}")
             break  # Avoid infinite loop if prepare/launch fails fundamentally
+
+        if not completed_targets_batch:
+            logging.error(
+                "No progress made during batch execution. Aborting to avoid infinite loop."
+            )
+            for t in pending_targets:
+                if t not in completed_targets:
+                    results.append({
+                        "Target":
+                        t,
+                        "Status":
+                        "FAIL",
+                        "Reason":
+                        "Simulator failed without making progress",
+                        "Log Path":
+                        os.path.join("logs", test_info_map[t]['safe_log'])
+                    })
+                    completed_targets.add(t)
+            break
 
         # Update pending targets for next batch attempt
         pending_targets = [

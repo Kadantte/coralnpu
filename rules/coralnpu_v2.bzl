@@ -18,6 +18,7 @@ load("//rules:uvm_denylist.bzl", "DENYLIST", "TIMEOUT_MAP", "is_uvm_denylisted")
 """Rules to build CoralNPU SW objects"""
 
 load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
+load("//rules:vcs.bzl", "vcs_batch_uvm_test")
 load("//rules:verilator.bzl", "verilator_batch_uvm_test")
 
 CORALNPU_V2_PLATFORM = "//platforms:coralnpu_v2"
@@ -379,9 +380,18 @@ def collect_coralnpu_elfs(tags = []):
                 run_spike = "//rules:uvm_run_spike_cosim",
                 tags = tags + ["verilator-uvm-regression", "verilator-uvm-regression-coralnpu-tests"],
             )
+            vcs_batch_uvm_test(
+                name = "vcs_uvm_regression_{}".format(label_name),
+                model = "//tests/uvm:uvm_sim_vcs",
+                coralnpu_tests = [elf],
+                timeouts = [TIMEOUT_MAP.get(canonical_label, 100000)],
+                labels = [canonical_label],
+                run_spike = "//rules:uvm_run_spike_cosim",
+                tags = tags + ["vcs", "vcs-uvm-regression", "vcs-uvm-regression-coralnpu-tests"],
+            )
 
 def collect_coralnpu_riscv_tests(binaries = [], tags = []):
-    """Generates Verilator UVM regression tests for all binaries in the list.
+    """Generates Verilator and VCS UVM regression tests for all binaries in the list.
 
     Used specifically for third_party/riscv-tests.
     All tests are tagged for regression execution.
@@ -402,4 +412,13 @@ def collect_coralnpu_riscv_tests(binaries = [], tags = []):
                 labels = [canonical_label],
                 run_spike = "//rules:uvm_run_spike_cosim",
                 tags = tags + ["verilator-uvm-regression", "verilator-uvm-regression-riscv-tests"],
+            )
+            vcs_batch_uvm_test(
+                name = "vcs_uvm_regression_riscv_tests_{}".format(label_name),
+                model = "//tests/uvm:uvm_sim_vcs",
+                coralnpu_tests = [":{}".format(elf)],
+                timeouts = [TIMEOUT_MAP.get(canonical_label, 100000)],
+                labels = [canonical_label],
+                run_spike = "//rules:uvm_run_spike_cosim",
+                tags = tags + ["vcs", "vcs-uvm-regression", "vcs-uvm-regression-riscv-tests"],
             )

@@ -74,123 +74,61 @@ The testbench follows a standard UVM directory structure:
 │   └── coralnpu_tb_top.sv
 ├── tests/                   # UVM Tests and Sequences
 │   └── coralnpu_test_pkg.sv
-├── Makefile                 # Makefile for compilation and simulation
 ├── coralnpu_dv.f            # File list for compilation
 └── bin/                     # Directory for test binaries
     └── program.elf          # (Needs to be generated and copied here)
 ```
 
-## Running the Testbench using the Makefile
+## Running the Testbench using Bazel
 
-The provided `Makefile` simplifies the compilation and simulation process.
+The UVM testbench models and regressions are built and run directly using Bazel.
 
-**1. Compiling the Simulator Executable:**
+**1. Compiling the Simulator Models:**
 
-* **Command:** `make compile`
-* **Action:**
-  * Creates necessary directories (`sim_work`, `logs`, `waves`).
-  * Generates the DUT Verilog from Chisel sources.
-  * Builds the MPACT co-simulation C++ library.
-  * Compiles the DUT and testbench SystemVerilog files using VCS based on `coralnpu_dv.f`.
-  * Creates the `sim_work/simv` executable.
-* Users should run `make compile` whenever modifying SystemVerilog (`.sv`),
-  Chisel (`.scala`), or C++ (`.cpp`) source files that are part of the
-  DUT or testbench.
-* **Expected Output:**
-
-  ```text
-  --- Checking MPACT-Sim Co-sim Library dependencies ---
-  --- Checking RTL source dependencies ---
-  --- Compiling with VCS ---
-  Chronologic VCS simulator copyright 1991-202X
-  Contains Synopsys proprietary information.
-  Compiler version ...
-  ... (VCS compilation messages) ...
-  Top Level Modules:
-          coralnpu_tb_top
-  TimeScale is 1ns / 1ps
-  --- Compilation Finished ---
-  ```
-
-  Check `sim_work/logs/compile.log` for detailed messages and errors.
-
-**2. Running the Simulation:**
-
-* **Command (Default Test):** `make run`
-  * Runs the default test (`coralnpu_base_test`) defined in the Makefile.
-  * Uses the default program (`bin/program.elf`).
-  * Uses `UVM_MEDIUM` verbosity.
-* **Command (Specific Test & Binary):**
+* **Verilator Model:**
 
   ```bash
-  make run UVM_TESTNAME=<your_specific_test> \
-            TEST_ELF=/path/to/another.elf \
-            UVM_VERBOSITY=UVM_HIGH
+  bazel build //tests/uvm:uvm_sim_verilator
   ```
 
-  * Overrides the default test name, binary path, and verbosity level.
-* **Action:**
-  * Generates memory initialization files (`.mem`) and runtime options
-    (`elf_run_opts.f`) from the specified `TEST_ELF` (this always runs).
-  * Executes the *already compiled* `simv` executable with the specified UVM runtime options.
-  * Users should run `make run` after `make compile` has successfully
-    finished, or when only the `TEST_ELF` file changes and recompilation
-    is not needed.
-* **Expected Output:**
+* **VCS Model:**
 
-    ```
-    --- Running Simulation ---
-    Test:      coralnpu_base_test
-    ELF File:  ./bin/program.elf
-    Verbosity: UVM_MEDIUM
-    Timeout:   20000 ns
-    Plusargs:  +UVM_TESTNAME=coralnpu_base_test +UVM_VERBOSITY=UVM_MEDIUM \
-               +TEST_TIMEOUT=20000 +TEST_ELF=./bin/program.elf
-    Log File:  ./sim_work/logs/coralnpu_base_test.log
-    Wave File: ./sim_work/waves/coralnpu_base_test.fsdb
-    Chronologic VCS simulator copyright 1991-202X
-    Contains Synopsys proprietary information.
-    Simulator version ... ; Runtime version ...
-    UVM_INFO @ 0: reporter [RNTST] Running test coralnpu_base_test...
-    ... (UVM simulation messages based on verbosity) ...
-    UVM_INFO ./tests/coralnpu_test_pkg.sv(LINE#) @ TIME: uvm_test_top \
-        [coralnpu_base_test] Run phase finishing
-    UVM_INFO ./tests/coralnpu_test_pkg.sv(LINE#) @ TIME: uvm_test_top \
-        [coralnpu_base_test] Test ended on DUT halt.
-    --- UVM Report Summary ---
-    ...
-    UVM_INFO ./tests/coralnpu_test_pkg.sv(241) @ TIME: uvm_test_top \
-        [coralnpu_base_test] ** UVM TEST PASSED **
-    --- Simulation Finished ---
-    ```
+  ```bash
+  bazel build --config=vcs //tests/uvm:uvm_sim_vcs
+  ```
 
-  * Look for the `** UVM TEST PASSED **` or `** UVM TEST FAILED **` message
-    at the end of the simulation log (`sim_work/logs/<testname>.log`).
-  * If enabled, a waveform file (`sim_work/waves/<testname>.fsdb`) will be
-    generated.
+**2. Running UVM Regressions via Bazel:**
 
-**3. Combined Compile and Run:**
+* **Verilator Single Test:**
 
-* **Command:** `make all` (or simply `make`)
-* **Action:** This command first runs `make compile` to ensure the simulator
-  executable is up-to-date, then runs `make run`. This is a convenient
-  way to perform a full build and run.
+  ```bash
+  bazel test //tests/cocotb:uvm_regression_nop_test
+  ```
 
-**4. Cleaning:**
+* **VCS Single Test:**
 
-* **Command:** `make clean`
-* **Action:** Removes the `sim_work` directory and other simulation-generated
-  files (`simv`, `csrc`, logs, waveforms, etc.). It also cleans Bazel
-  caches for the MPACT library and generated RTL.
-* **Expected Output:**
+  ```bash
+  bazel test --config=vcs //tests/cocotb:vcs_uvm_regression_nop_test
+  ```
 
-    ```
-    --- Cleaning Simulation Files ---
-    rm -rf sim_work simv* csrc* *.log* *.key *.vpd *.fsdb ucli.key DVEfiles/ \
-           verdiLog/ novas.*
-    --- Cleaning MPACT-Sim Bazel cache ---
-    ... (Bazel clean messages) ...
-    ```
+* **Full Regression Suite:**
 
-This README should help you get started with compiling and running the basic
-test for the `RvvCoreMiniVerificationAxi` DUT.
+  ```bash
+  # Verilator
+  bazel test --test_tag_filters=uvm-regression //tests/cocotb:all
+
+  # VCS
+  bazel test --config=vcs --test_tag_filters=vcs-uvm-regression //tests/cocotb:all
+  ```
+
+**3. Running Regressions via `run_uvm_regression.py`:**
+
+You can also run batch or targeted regressions using the Python runner:
+
+```bash
+# Run with Verilator
+python3 utils/run_uvm_regression.py --simulator=verilator --target=//tests/cocotb:nop_test
+
+# Run with VCS
+python3 utils/run_uvm_regression.py --simulator=vcs --target=//tests/cocotb:nop_test
+```

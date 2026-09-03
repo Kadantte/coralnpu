@@ -7,6 +7,7 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_hdl//verilator:defs.bzl", "verilator_cc_library")
 load("@rules_hdl//verilog:providers.bzl", "VerilogInfo", "verilog_library")
 load("//rules:utils.bzl", "filter_files_by_extension")
+load("//rules:vcs.bzl", "vcs_model")
 load("//rules:verilator.bzl", "verilator_model")
 
 package(default_visibility = ["//visibility:public"])
@@ -102,6 +103,33 @@ verilator_model(
     verilog_sources = [
         "//hdl/chisel/src/coralnpu:rvv_core_mini_verification_axi_cc_library_emit_verilog_single_sv",
         ":source_files",
+    ],
+    deps = [
+        ":include_dirs_deps",
+        "//hdl/verilog:dpi_files",
+    ],
+)
+
+vcs_model(
+    name = "uvm_sim_vcs",
+    cflags = [
+        "+define+UVM_NO_DEPRECATED",
+        "+define+TB_SUPPORT",
+        "+define+VLEN_128",
+        "+define+ZVE32F_ON",
+        "+define+USE_GENERIC",
+        "-ntb_opts",
+        "uvm-1.2",
+        "-timescale=1ns/1ps",
+        "-debug_access+all",
+    ],
+    coralnpu_mpact_lib = ":coralnpu_cosim_lib_static_archive",
+    hdl_toplevel = "coralnpu_tb_top",
+    include_dirs = [":include_dirs"],
+    tags = ["vcs"],
+    verilog_sources = [
+        ":source_files",
+        "//hdl/chisel/src/coralnpu:rvv_core_mini_verification_axi_cc_library_emit_verilog_single_sv",
     ],
     deps = [
         ":include_dirs_deps",

@@ -74,24 +74,83 @@ def _build_cases():
                 _pack_mtype(tm=5, tk=2, mtwiden=1),  # mtype_after_msettk
             ),
         ),
-        # Case 1: SEW16/LMUL1, vlmax = VLENB/2 = 8. msettn(100) clamps to 8.
+        # Case 1: SEW16 with mtwiden=2 derives LMUL=2 (vlmax = 2 * (VLENB/2) = 16).
+        # msettn(100) clamps to 16 (previously was 8 when LMUL was not derived).
         # msettm gets a near-max 14-bit value; msettk gets >3 and clamps to 3
         # (the 2-bit field, matching the literal spec layout we follow).
         dict(
             inputs=(
                 _pack_mtype(tm=3, tk=2, mtwiden=2),  # mtype_value
-                0x08,  # vtype: SEW16/LMUL1
-                100,  # msettn avl  -> clamps to vlmax
+                0x08,  # vtype: SEW16/LMUL1 passed in rs2
+                100,  # msettn avl  -> clamps to vlmax (16)
                 0x3FFF,  # msettm arg  -> stays at 0x3FFF
                 10,  # msettk arg  -> clamps to 3
             ),
             expected=(
                 _pack_mtype(tm=3, tk=2, mtwiden=2),
-                8,
+                16,
                 0x3FFF,
                 _pack_mtype(tm=0x3FFF, tk=2, mtwiden=2),
                 3,
                 _pack_mtype(tm=0x3FFF, tk=3, mtwiden=2),
+            ),
+        ),
+        # Case 2: SEW32 with mtwiden=1 derives LMUL=4 (vlmax = 4 * (128/32) = 16).
+        # Even if LMUL1 is passed in rs2 (vtype=0x10), msetmtype derives LMUL=4.
+        # msettn(8) should set rd = vl = min(8, vlmax) = 8.
+        dict(
+            inputs=(
+                0x2021,  # mtype_value: tm=8, tk=1, mtwiden=1
+                0x10,  # vtype_value: SEW32, LMUL1 (0x10)
+                8,  # msettn avl = 8
+                8,  # msettm arg = 8
+                1,  # msettk arg = 1
+            ),
+            expected=(
+                0x2021,  # mtype_after_msetmtype
+                8,  # rd_after_msettn (must be 8, not 4!)
+                8,  # rd_after_msettm
+                0x2021,  # mtype_after_msettm
+                1,  # rd_after_msettk
+                0x2021,  # mtype_after_msettk
+            ),
+        ),
+        # Case 3: SEW32 with LMUL4 clamps to vlmax = 16 for avl >= 16.
+        dict(
+            inputs=(
+                0x2021,  # mtype_value: tm=8, tk=1, mtwiden=1
+                0x10,  # vtype_value: SEW32, LMUL1 (0x10)
+                100,  # msettn avl = 100 -> clamps to vlmax (16)
+                8,  # msettm arg = 8
+                1,  # msettk arg = 1
+            ),
+            expected=(
+                0x2021,  # mtype_after_msetmtype
+                16,  # rd_after_msettn
+                8,  # rd_after_msettm
+                0x2021,  # mtype_after_msettm
+                1,  # rd_after_msettk
+                0x2021,  # mtype_after_msettk
+            ),
+        ),
+        # Case 4: Unconfigured matrix unit (mtwiden=0).
+        # mtype is zeroed. vtype retains rs2 (SEW32, LMUL1) as in vsetvl.
+        # vlmax = 4. msettn(100) clamps to 4.
+        dict(
+            inputs=(
+                0x0000,  # mtype_value: mtwiden=0
+                0x10,  # vtype_value: SEW32, LMUL1
+                100,  # msettn avl = 100 -> clamps to vlmax (4)
+                0,  # msettm arg
+                0,  # msettk arg
+            ),
+            expected=(
+                0x0000,  # mtype_after_msetmtype is 0
+                4,  # rd_after_msettn (vlmax=4 under LMUL1)
+                0,  # rd_after_msettm
+                0x0000,  # mtype_after_msettm
+                0,  # rd_after_msettk
+                0x0000,  # mtype_after_msettk
             ),
         ),
     ]

@@ -41,6 +41,7 @@ COCOTB_TEST_BINARY_TARGETS = glob(["**/*.elf"]) + glob(["**/*.o"]) + [
     ":minstret_test.elf",
     ":misa_test.elf",
     ":stress_test.elf",
+    ":retire_buffer_full_illegal_inst.elf",
     ":unreachable_prefetch_fault.elf",
     ":vector_store_fault.elf",
     ":wfi_slot_0.elf",
@@ -136,6 +137,7 @@ CORE_MINI_AXI_SIM_TESTCASES = [
     "core_mini_axi_float_csr_test",
     "core_mini_axi_float_hazard_test",
     "unreachable_prefetch_fault",
+    "core_mini_axi_retire_buffer_full_illegal_inst_test",
     "core_mini_axi_frm_test",
     "core_mini_axi_fcsr_frm_hazard_test",
     "core_mini_axi_backdoor_load_test",
@@ -164,6 +166,7 @@ RVV_CORE_MINI_AXI_SIM_TESTCASES = [
     "core_mini_axi_float_csr_test",
     "core_mini_axi_float_hazard_test",
     "unreachable_prefetch_fault",
+    "core_mini_axi_retire_buffer_full_illegal_inst_test",
     "core_mini_axi_frm_test",
     "core_mini_axi_fcsr_frm_hazard_test",
     "rvv_frm_hazard_test",
@@ -564,6 +567,13 @@ coralnpu_v2_binary(
     name = "finish_txn_before_halt",
     srcs = [
         "finish_txn_before_halt.cc",
+    ],
+)
+
+coralnpu_v2_binary(
+    name = "retire_buffer_full_illegal_inst",
+    srcs = [
+        "retire_buffer_full_illegal_inst.S",
     ],
 )
 

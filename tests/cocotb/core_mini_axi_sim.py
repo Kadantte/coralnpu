@@ -863,3 +863,43 @@ async def rvv_misa_test(dut):
     assert csrrc_clear_all_read == initial_misa, f"WARL violation: CSRRC changed MISA to 0x{csrrc_clear_all_read:08x}"
 
     dut._log.info("RvvCoreMiniAxi MISA contents and WARL test passed!")
+
+
+@cocotb.test()
+async def core_mini_axi_retire_buffer_full_illegal_inst_test(dut):
+    """Verifies that an illegal instruction does not push into a full RetirementBuffer."""
+    core_mini_axi = CoreMiniAxiInterface(dut, read_delay_cycles=50)
+    await core_mini_axi.init()
+    await core_mini_axi.reset()
+    cocotb.start_soon(core_mini_axi.clock.start())
+    r = runfiles.Create()
+
+    elf_path = r.Rlocation(
+        "coralnpu_hw/tests/cocotb/retire_buffer_full_illegal_inst.elf"
+    )
+    if not elf_path:
+        raise ValueError("elf_path must consist a valid path")
+    with open(elf_path, "rb") as f:
+        entry_point = await core_mini_axi.load_elf(f)
+
+    with open(elf_path, "rb") as f:
+        trap_info_addr = core_mini_axi.lookup_symbol(f, "trap_info")
+        illegal_inst_addr = core_mini_axi.lookup_symbol(f, "illegal_inst")
+
+    # Initialize external memory at 0x20000000
+    await core_mini_axi.write_word(0x20000000, 0x12345678)
+    await core_mini_axi.write(trap_info_addr, np.zeros(4, dtype=np.uint32))
+
+    await core_mini_axi.execute_from(entry_point)
+    await core_mini_axi.wait_for_wfi()
+
+    trap_info = (await core_mini_axi.read(trap_info_addr, 16)).view(np.uint32)
+    mcause, mepc, mtval, trap_count = trap_info
+
+    dut._log.info(
+        f"TRAP INFO: mcause={mcause}, mepc={hex(mepc)}, mtval={hex(mtval)}, trap_count={trap_count}"
+    )
+
+    assert trap_count == 1, f"Expected 1 trap, got {trap_count}"
+    assert mcause == 2, f"Expected mcause=2 (Illegal instruction), got {mcause}"
+    assert mepc == illegal_inst_addr, f"Expected mepc={hex(illegal_inst_addr)}, got {hex(mepc)}"

@@ -39,6 +39,8 @@ DENYLIST = [
     "//third_party/riscv-tests:rv32ui-v-fence_i",
     # Runs code in DDR (not supported by MPACT atm)
     "//tests/cocotb:fencei_test",
+    # Requires custom testbench / delayed external memory
+    "//tests/cocotb:retire_buffer_full_illegal_inst",
     # Actual RVV bugs?
     "//tests/cocotb/rvv:vmsif_test",
     "//tests/cocotb/rvv:vmsbf_test",

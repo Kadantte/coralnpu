@@ -103,7 +103,8 @@ class RetirementBuffer(p: Parameters, mini: Boolean = false) extends Module {
   // Valid fault, no fire, also not a load/store: those faults should be handled purely in the update stage
   val noFire0Fault = (io.fault.valid && !io
     .inst(0)
-    .fire && (io.fault.bits.mcause =/= 7.U) && (io.fault.bits.mcause =/= 5.U))
+    .fire && (io.fault.bits.mcause =/= 7.U) && (io.fault.bits.mcause =/= 5.U) &&
+    !io.fault.bits.is_rvv.getOrElse(false.B))
   val faultPc = io.fault.bits.mepc
 
   // Registered copy of the fault for the retirement scan. The same-cycle
@@ -315,7 +316,9 @@ class RetirementBuffer(p: Parameters, mini: Boolean = false) extends Module {
   )
 
   val instsWithWriteFired = PopCount(io.inst.map(_.fire))
-  instBuffer.io.enqValid := instsWithWriteFired +& (decodeFaultValid || noFire0Fault)
+  val canEnqFault         =
+    (decodeFaultValid || noFire0Fault) && (instBuffer.io.nSpace > instsWithWriteFired)
+  instBuffer.io.enqValid := instsWithWriteFired +& canEnqFault
   io.nSpace              := instBuffer.io.nSpace
 
   for (i <- 0 until p.instructionLanes) {

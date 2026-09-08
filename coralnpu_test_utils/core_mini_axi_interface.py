@@ -183,6 +183,7 @@ class CoreMiniAxiInterface:
         csr_base_addr=0x30000,
         ext_mem_base_addr=0x20000000,
         ext_mem_size=(4 * 1024 * 1024),
+        read_delay_cycles=0,
         **kwargs
     ):
         # Allow overriding clock_ns from plusargs or environment.
@@ -228,6 +229,7 @@ class CoreMiniAxiInterface:
         self.csr_base_addr = csr_base_addr
         self.memory_base_addr = ext_mem_base_addr
         self.memory = np.zeros([ext_mem_size], dtype=np.uint8)
+        self.read_delay_cycles = read_delay_cycles
         self.master_arfifo = Queue()
         self.master_awfifo = Queue()
         self.master_rfifo = Queue()
@@ -452,6 +454,8 @@ class CoreMiniAxiInterface:
     async def memory_read_agent(self):
         while True:
             ardata = await self.master_arfifo.get()
+            if self.read_delay_cycles > 0:
+                await ClockCycles(self.dut.io_aclk, self.read_delay_cycles)
             data = self.read_memory(ardata)
             if data is None:
                 for i in range(0, ardata["len"] + 1):

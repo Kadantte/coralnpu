@@ -545,10 +545,6 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
     if (i == 0) { false.B }
     else { decodedInsts(i).undef }
   )
-  io.undefFault := (0 until p.instructionLanes).map(i =>
-    if (i == 0) { io.inst(i).valid && decodedInsts(i).undef }
-    else { false.B }
-  )
 
   // ---------------------------------------------------------------------------
   // Core idle
@@ -601,6 +597,11 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
         .isCsr() || io.retirement_buffer_empty) && // CSRs must wait for ROB to be empty
       singleStepInterlock(i) &&
       mpauseInterlock(i)
+  )
+
+  io.undefFault := (0 until p.instructionLanes).map(i =>
+    if (i == 0) { canDispatch(0) && decodedInsts(0).undef }
+    else { false.B }
   )
 
   // ---------------------------------------------------------------------------
@@ -946,7 +947,9 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
                                val villIsSet   = io.rvvState.get.valid && io.rvvState.get.bits.vill
                                val invalidVill = isNonWrLdSt && villIsSet
 
-                               io.inst(0).valid && (invalidVstart || invalidVill)
+                               io.inst(0).valid && (invalidVstart || invalidVill) &&
+                               (0.U < io.retirement_buffer_nSpace) &&
+                               !io.retirement_buffer_trap_pending
                              } else {
                                false.B
                              })

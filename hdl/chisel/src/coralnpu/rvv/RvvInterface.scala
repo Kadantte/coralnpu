@@ -49,9 +49,10 @@ class RvvConfigState(p: Parameters) extends Bundle {
 }
 
 class Lsu2Rvv(p: Parameters) extends Bundle {
-  val addr = UInt(p.rvvRegCountWidth.W)
-  val data = UInt(p.rvvVlen.W)
-  val last = Bool()
+  val addr          = UInt(p.rvvRegCountWidth.W)
+  val data          = UInt(p.rvvVlen.W)
+  val last          = Bool()
+  val ff_tail_index = UInt(log2Ceil(p.rvvVlenb + 1).W)
 }
 
 class Rvv2Lsu(p: Parameters) extends Bundle {

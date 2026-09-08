@@ -29,6 +29,9 @@ template_rule(
         "whole_reg_repro": {
             "srcs": ["whole_reg_repro.cc"],
         },
+        "load_unit_ff": {
+            "srcs": ["load_unit_ff.cc"],
+        },
         "load_unit_masked": {
             "srcs": ["load_unit_masked.cc"],
         },
@@ -234,6 +237,7 @@ filegroup(
         ":load_store_bits.elf",
         ":load_store_whole_register.elf",
         ":load_stride_vtype.elf",
+        ":load_unit_ff.elf",
         ":load_unit_masked.elf",
         ":load_unit_vtype.elf",
         ":lsu_fault_cases.elf",

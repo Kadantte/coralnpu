@@ -276,6 +276,7 @@ RVV_ASSEMBLY_TESTCASES = [
     "core_mini_rvv_vstart_vmv_scalar_test",
     "core_mini_rvv_vstart_vset_test",
     "core_mini_rvv_vfrdiv_test",
+    "core_mini_rvv_vleff_test",
 ]
 # END_TESTCASES_FOR_rvv_assembly_cocotb_test
 
@@ -284,6 +285,7 @@ RVV_LOAD_STORE_TESTCASES = [
     "load_store_bits",
     "load_store_whole_register_test",
     "load_unit_masked",
+    "load_unit_ff",
     "load_unit_all_vtypes_test",
     ("load_strided_all_vtypes_test", "large"),
     "load8_index8",
@@ -341,6 +343,7 @@ RVV_LOAD_STORE_TESTCASES = [
     "lsu_fault_seg3_negative_stride_mid_vstart",
     "lsu_fault_seg5_negative_stride_mid_vstart",
     "lsu_fault_vector_load_rs_flush",
+    "lsu_fault_vleff_rs_flush",
     "lsu_fault_scalar_mixed_rs_flush",
     "lsu_fault_scalar_to_scalar_rs_flush",
     "load_store8_test",

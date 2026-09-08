@@ -2114,3 +2114,182 @@ async def core_mini_rvv_vfrdiv_test(dut):
     assert np.array_equal(
         v18_result, expected_v18
     ), f"v18 mismatch: got {[hex(x) for x in v18_result]}, expected {[hex(x) for x in expected_v18]}"
+
+
+@cocotb.test()
+async def core_mini_rvv_vleff_test(dut):
+    """Testbench to test fault-only-first loads vle16ff.v, vle8ff.v, vle32ff.v across varied configurations."""
+    core_mini_axi = CoreMiniAxiInterface(dut)
+    await core_mini_axi.init()
+    await core_mini_axi.reset()
+    cocotb.start_soon(core_mini_axi.clock.start())
+    r = runfiles.Create()
+
+    elf_path = r.Rlocation("coralnpu_hw/tests/cocotb/rvv/rvv_vleff_test.elf")
+    if not elf_path:
+        raise ValueError("elf_path must consist a valid path")
+    with open(elf_path, "rb") as f:
+        entry_point = await core_mini_axi.load_elf(f)
+
+    with open(elf_path, "rb") as f:
+        v12_result_addr = core_mini_axi.lookup_symbol(f, "v12_result")
+        v8_result_addr = core_mini_axi.lookup_symbol(f, "v8_result")
+        v4_result_addr = core_mini_axi.lookup_symbol(f, "v4_result")
+        v14_result_addr = core_mini_axi.lookup_symbol(f, "v14_result")
+        v16_result_addr = core_mini_axi.lookup_symbol(f, "v16_result")
+        v20_result_addr = core_mini_axi.lookup_symbol(f, "v20_result")
+        v24_result_addr = core_mini_axi.lookup_symbol(f, "v24_result")
+        v25_result_addr = core_mini_axi.lookup_symbol(f, "v25_result")
+        v26_result_addr = core_mini_axi.lookup_symbol(f, "v26_result")
+        vstart_result_addr = core_mini_axi.lookup_symbol(f, "vstart_result")
+        v30_result_addr = core_mini_axi.lookup_symbol(f, "v30_result")
+        v1_result_addr = core_mini_axi.lookup_symbol(f, "v1_result")
+        v2_result_addr = core_mini_axi.lookup_symbol(f, "v2_result")
+        v3_result_addr = core_mini_axi.lookup_symbol(f, "v3_result")
+
+    await core_mini_axi.execute_from(entry_point)
+    await core_mini_axi.wait_for_wfi()
+
+    # 1. Baseline vle16ff.v (e16, m1, vl=8)
+    v12_result = (await core_mini_axi.read(v12_result_addr,
+                                           16)).view(np.uint32)
+    expected_v12 = np.array([0x11112222, 0x33334444, 0x55556666, 0x77778888],
+                            dtype=np.uint32)
+    assert np.array_equal(
+        v12_result, expected_v12
+    ), f"v12 mismatch (vle16ff): got {[hex(x) for x in v12_result]}, expected {[hex(x) for x in expected_v12]}"
+
+    # 2. Baseline vle8ff.v (e8, m1, vl=16)
+    v8_result = (await core_mini_axi.read(v8_result_addr, 16)).view(np.uint32)
+    expected_v8 = np.array([0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e0f10],
+                           dtype=np.uint32)
+    assert np.array_equal(
+        v8_result, expected_v8
+    ), f"v8 mismatch (vle8ff): got {[hex(x) for x in v8_result]}, expected {[hex(x) for x in expected_v8]}"
+
+    # 3. Baseline vle32ff.v (e32, m1, vl=4)
+    v4_result = (await core_mini_axi.read(v4_result_addr, 16)).view(np.uint32)
+    expected_v4 = np.array([0xdeadbeef, 0xcafebabe, 0x01234567, 0x89abcdef],
+                           dtype=np.uint32)
+    assert np.array_equal(
+        v4_result, expected_v4
+    ), f"v4 mismatch (vle32ff): got {[hex(x) for x in v4_result]}, expected {[hex(x) for x in expected_v4]}"
+
+    # 4. Masked vle16ff.v with tu, mu, vl = 5 (active elems: 0,2,4; inactive: 1,3; tail: 5..7)
+    v14_result = (await core_mini_axi.read(v14_result_addr,
+                                           16)).view(np.uint32)
+    expected_v14 = np.array([0xbbbb0101, 0xdddd0303, 0xffff0505, 0x56781234],
+                            dtype=np.uint32)
+    assert np.array_equal(
+        v14_result, expected_v14
+    ), f"v14 mismatch (masked tu/mu): got {[hex(x) for x in v14_result]}, expected {[hex(x) for x in expected_v14]}"
+
+    # 5. Multi-register m2 vle16ff.v (vl = 16, 32 bytes)
+    v16_result = (await core_mini_axi.read(v16_result_addr,
+                                           32)).view(np.uint32)
+    expected_v16 = np.array(
+        [
+            0x00020001,
+            0x00040003,
+            0x00060005,
+            0x00080007,
+            0x000a0009,
+            0x000c000b,
+            0x000e000d,
+            0x0010000f,
+        ],
+        dtype=np.uint32,
+    )
+    assert np.array_equal(
+        v16_result, expected_v16
+    ), f"v16 mismatch (m2): got {[hex(x) for x in v16_result]}, expected {[hex(x) for x in expected_v16]}"
+
+    # 6. Multi-register m4 vle32ff.v (vl = 16, 64 bytes)
+    v20_result = (await core_mini_axi.read(v20_result_addr,
+                                           64)).view(np.uint32)
+    expected_v20 = np.array(
+        [
+            0x10000001,
+            0x10000002,
+            0x10000003,
+            0x10000004,
+            0x10000005,
+            0x10000006,
+            0x10000007,
+            0x10000008,
+            0x10000009,
+            0x1000000a,
+            0x1000000b,
+            0x1000000c,
+            0x1000000d,
+            0x1000000e,
+            0x1000000f,
+            0x10000010,
+        ],
+        dtype=np.uint32,
+    )
+    assert np.array_equal(
+        v20_result, expected_v20
+    ), f"v20 mismatch (m4): got {[hex(x) for x in v20_result]}, expected {[hex(x) for x in expected_v20]}"
+
+    # 7. Fractional LMUL mf4 vle8ff.v (vl = 4, 4 bytes)
+    v24_result = (await core_mini_axi.read(v24_result_addr, 4)).view(np.uint32)
+    expected_v24 = np.array([0x44332211], dtype=np.uint32)
+    assert np.array_equal(
+        v24_result, expected_v24
+    ), f"v24 mismatch (mf4): got {[hex(x) for x in v24_result]}, expected {[hex(x) for x in expected_v24]}"
+
+    # 8. Fractional LMUL mf2 vle16ff.v (vl = 4, 8 bytes)
+    v25_result = (await core_mini_axi.read(v25_result_addr, 8)).view(np.uint32)
+    expected_v25 = np.array([0x22221111, 0x44443333], dtype=np.uint32)
+    assert np.array_equal(
+        v25_result, expected_v25
+    ), f"v25 mismatch (mf2): got {[hex(x) for x in v25_result]}, expected {[hex(x) for x in expected_v25]}"
+
+    # 9. Non-zero vstart = 2 (elems 0,1 untouched; elems 2..7 loaded; vstart cleared)
+    v26_result = (await core_mini_axi.read(v26_result_addr,
+                                           16)).view(np.uint32)
+    expected_v26 = np.array([0x00020001, 0x00400030, 0x00600050, 0x00800070],
+                            dtype=np.uint32)
+    assert np.array_equal(
+        v26_result, expected_v26
+    ), f"v26 mismatch (vstart=2): got {[hex(x) for x in v26_result]}, expected {[hex(x) for x in expected_v26]}"
+
+    vstart_result = (await core_mini_axi.read(vstart_result_addr,
+                                              4)).view(np.uint32)[0]
+    assert (
+        vstart_result == 0
+    ), f"vstart not reset: expected 0, got {vstart_result}"
+
+    # 10. RAW Hazard: vle16ff.v immediately consumed by vadd.vv
+    v30_result = (await core_mini_axi.read(v30_result_addr,
+                                           16)).view(np.uint32)
+    expected_v30 = np.array([0x00660065, 0x00680067, 0x006a0069, 0x006c006b],
+                            dtype=np.uint32)
+    assert np.array_equal(
+        v30_result, expected_v30
+    ), f"v30 mismatch (RAW hazard): got {[hex(x) for x in v30_result]}, expected {[hex(x) for x in expected_v30]}"
+
+    # 11. Unaligned vle16ff.v: base + 2, vl = 5, tu (ff_tail_index = 10)
+    v1_result = (await core_mini_axi.read(v1_result_addr, 16)).view(np.uint32)
+    expected_v1 = np.array([0x02020101, 0x04040303, 0xeeee0505, 0xeeeeeeee],
+                           dtype=np.uint32)
+    assert np.array_equal(
+        v1_result, expected_v1
+    ), f"v1 mismatch (unaligned vle16ff): got {[hex(x) for x in v1_result]}, expected {[hex(x) for x in expected_v1]}"
+
+    # 12. Unaligned vle8ff.v: base + 3, vl = 7, tu (ff_tail_index = 7)
+    v2_result = (await core_mini_axi.read(v2_result_addr, 16)).view(np.uint32)
+    expected_v2 = np.array([0x44332211, 0xaa776655, 0xaaaaaaaa, 0xaaaaaaaa],
+                           dtype=np.uint32)
+    assert np.array_equal(
+        v2_result, expected_v2
+    ), f"v2 mismatch (unaligned vle8ff): got {[hex(x) for x in v2_result]}, expected {[hex(x) for x in expected_v2]}"
+
+    # 13. Unaligned vle32ff.v: base + 4, vl = 3, tu (ff_tail_index = 12)
+    v3_result = (await core_mini_axi.read(v3_result_addr, 16)).view(np.uint32)
+    expected_v3 = np.array([0x11111111, 0x22222222, 0x33333333, 0xcccccccc],
+                           dtype=np.uint32)
+    assert np.array_equal(
+        v3_result, expected_v3
+    ), f"v3 mismatch (unaligned vle32ff): got {[hex(x) for x in v3_result]}, expected {[hex(x) for x in expected_v3]}"

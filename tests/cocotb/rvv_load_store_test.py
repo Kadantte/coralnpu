@@ -511,6 +511,256 @@ async def load_unit_masked(dut):
 
 
 @cocotb.test()
+async def load_unit_ff(dut):
+    """Test fault-only-first unit loads (vle8ff.v, vle16ff.v, vle32ff.v) across all SEWs and LMULs."""
+
+    fixture = await Fixture.Create(dut)
+    r = runfiles.Create()
+
+    await fixture.load_elf_and_lookup_symbols(
+        r.
+        Rlocation('coralnpu_hw/tests/cocotb/rvv/load_store/load_unit_ff.elf'),
+        [
+            "impl",
+            "vtype",
+            "load_data",
+            "load_addr",
+            "vl",
+            "load_filler",
+            "mask_data",
+            "store_data",
+            "test_unit_load8_ff",
+            "test_unit_load16_ff",
+            "test_unit_load32_ff",
+            "test_unit_load8_ff_unmasked",
+            "test_unit_load16_ff_unmasked",
+            "test_unit_load32_ff_unmasked",
+        ],
+    )
+
+    cases = [
+        # SEW8
+        (np.uint8, 0b110, 4),  # SEW8, mf4, vlmax=4
+        (np.uint8, 0b110, 3),  # SEW8, mf4, partial vl
+        (np.uint8, 0b111, 8),  # SEW8, mf2, vlmax=8
+        (np.uint8, 0b111, 7),  # SEW8, mf2, partial vl
+        (np.uint8, 0b000, 16),  # SEW8, m1, vlmax=16
+        (np.uint8, 0b000, 15),  # SEW8, m1, partial vl
+        (np.uint8, 0b000, 1),  # SEW8, m1, single element vl=1
+        (np.uint8, 0b001, 32),  # SEW8, m2, vlmax=32
+        (np.uint8, 0b001, 31),  # SEW8, m2, partial vl
+        (np.uint8, 0b010, 64),  # SEW8, m4, vlmax=64
+        (np.uint8, 0b010, 63),  # SEW8, m4, partial vl
+        (np.uint8, 0b011, 128),  # SEW8, m8, vlmax=128
+        (np.uint8, 0b011, 127),  # SEW8, m8, partial vl
+        # SEW16
+        (np.uint16, 0b111, 4),  # SEW16, mf2, vlmax=4
+        (np.uint16, 0b111, 3),  # SEW16, mf2, partial vl
+        (np.uint16, 0b000, 8),  # SEW16, m1, vlmax=8
+        (np.uint16, 0b000, 7),  # SEW16, m1, partial vl
+        (np.uint16, 0b000, 1),  # SEW16, m1, single element vl=1
+        (np.uint16, 0b001, 16),  # SEW16, m2, vlmax=16
+        (np.uint16, 0b001, 15),  # SEW16, m2, partial vl
+        (np.uint16, 0b010, 32),  # SEW16, m4, vlmax=32
+        (np.uint16, 0b010, 31),  # SEW16, m4, partial vl
+        (np.uint16, 0b011, 64),  # SEW16, m8, vlmax=64
+        (np.uint16, 0b011, 63),  # SEW16, m8, partial vl
+        # SEW32
+        (np.uint32, 0b000, 4),  # SEW32, m1, vlmax=4
+        (np.uint32, 0b000, 3),  # SEW32, m1, partial vl
+        (np.uint32, 0b000, 1),  # SEW32, m1, single element vl=1
+        (np.uint32, 0b001, 8),  # SEW32, m2, vlmax=8
+        (np.uint32, 0b001, 7),  # SEW32, m2, partial vl
+        (np.uint32, 0b010, 16),  # SEW32, m4, vlmax=16
+        (np.uint32, 0b010, 15),  # SEW32, m4, partial vl
+        (np.uint32, 0b011, 32),  # SEW32, m8, vlmax=32
+        (np.uint32, 0b011, 31),  # SEW32, m8, partial vl
+    ]
+
+    dtype_to_masked_function = {
+        np.uint8: "test_unit_load8_ff",
+        np.uint16: "test_unit_load16_ff",
+        np.uint32: "test_unit_load32_ff",
+    }
+    dtype_to_unmasked_function = {
+        np.uint8: "test_unit_load8_ff_unmasked",
+        np.uint16: "test_unit_load16_ff_unmasked",
+        np.uint32: "test_unit_load32_ff_unmasked",
+    }
+
+    rng = np.random.default_rng(42)
+
+    # 1. Unmasked fault-only-first loads across TCM and AXI
+    unmasked_tests = list(itertools.product([False, True], cases))
+    for use_axi, (dtype, lmul, vl) in tqdm.tqdm(unmasked_tests,
+                                                desc="load_unit_ff unmasked"):
+        vtype = construct_vtype(0, 0, DTYPE_TO_SEW[dtype], lmul)
+        min_value = np.iinfo(dtype).min
+        max_value = np.iinfo(dtype).max + 1
+        load_data = rng.integers(min_value, max_value, vl, dtype=dtype)
+        load_filler = np.iinfo(dtype).max
+
+        if use_axi:
+            await fixture.write_word(
+                'load_addr', fixture.core_mini_axi.memory_base_addr
+            )
+        else:
+            await fixture.write_ptr('load_addr', 'load_data')
+
+        await fixture.write_ptr('impl', dtype_to_unmasked_function[dtype])
+        await fixture.write_word('vl', vl)
+        await fixture.write_word('load_filler', load_filler)
+        await fixture.write_word('vtype', vtype)
+        if use_axi:
+            load_data_size = vl * np.dtype(dtype).itemsize
+            fixture.core_mini_axi.memory[0:load_data_size] = (
+                load_data.view(np.uint8)
+            )
+        else:
+            await fixture.write('load_data', load_data)
+
+        await fixture.run_to_halt()
+
+        actual_output = (
+            await fixture.read('store_data',
+                               vl * np.dtype(dtype).itemsize)
+        ).view(dtype)
+
+        assert np.array_equal(
+            load_data, actual_output
+        ), f"unmasked mismatch at vl={vl}, dtype={dtype}, lmul={lmul}, axi={use_axi}"
+
+    # 2. Masked fault-only-first loads across TCM and AXI with random mask, all-ones, and all-zeros
+    mask_modes = ['random', 'all_ones', 'all_zeros']
+    for mask_mode in mask_modes:
+        # For all_ones and all_zeros, testing on TCM is sufficient to keep test runtime lean.
+        tested_axi = [False, True] if mask_mode == 'random' else [False]
+        masked_tests = list(itertools.product(tested_axi, cases))
+        for use_axi, (dtype, lmul, vl) in tqdm.tqdm(
+                masked_tests, desc=f"load_unit_ff masked_{mask_mode}"):
+            vtype = construct_vtype(0, 0, DTYPE_TO_SEW[dtype], lmul)
+            mask_bytes = (vl + 7) // 8
+            if mask_mode == 'random':
+                mask_data = rng.integers(0, 256, mask_bytes, dtype=np.uint8)
+            elif mask_mode == 'all_ones':
+                mask_data = np.full(mask_bytes, 0xFF, dtype=np.uint8)
+            else:  # all_zeros
+                mask_data = np.zeros(mask_bytes, dtype=np.uint8)
+
+            min_value = np.iinfo(dtype).min
+            max_value = np.iinfo(dtype).max + 1
+            load_data = rng.integers(min_value, max_value, vl, dtype=dtype)
+            load_filler = np.iinfo(dtype).max
+
+            if use_axi:
+                await fixture.write_word(
+                    'load_addr', fixture.core_mini_axi.memory_base_addr
+                )
+            else:
+                await fixture.write_ptr('load_addr', 'load_data')
+
+            await fixture.write_ptr('impl', dtype_to_masked_function[dtype])
+            await fixture.write_word('vl', vl)
+            await fixture.write_word('load_filler', load_filler)
+            await fixture.write_word('vtype', vtype)
+            if use_axi:
+                load_data_size = vl * np.dtype(dtype).itemsize
+                fixture.core_mini_axi.memory[0:load_data_size] = (
+                    load_data.view(np.uint8)
+                )
+            else:
+                await fixture.write('load_data', load_data)
+            await fixture.write('mask_data', mask_data)
+
+            await fixture.run_to_halt()
+
+            actual_output = (
+                await
+                fixture.read('store_data',
+                             vl * np.dtype(dtype).itemsize)
+            ).view(dtype)
+
+            mask_bits = np.concat([
+                list(reversed(np.unpackbits(x))) for x in mask_data
+            ])
+            for i in range(vl):
+                if mask_bits[i]:
+                    assert load_data[i] == actual_output[i], (
+                        f"mismatch at element {i} (mask_mode={mask_mode}, axi={use_axi}): "
+                        f"expected load_data {load_data[i]}, got {actual_output[i]}"
+                    )
+                else:
+                    assert load_filler == actual_output[i], (
+                        f"mismatch at masked element {i} (mask_mode={mask_mode}, axi={use_axi}): "
+                        f"expected filler {load_filler}, got {actual_output[i]}"
+                    )
+
+    # 3. Diverse alignments and intermediate vector lengths across TCM and AXI
+    # Tests non-zero byte offsets (unaligned addresses: +1, +2, +3, +7) across varied
+    # vector lengths vl (1..15) ensuring intermediate ff_tail_index values (1..15)
+    # between 0 and p.rvvVlenb (16) operate correctly with unaligned memory accesses.
+    alignment_cases = [
+        # (dtype, lmul, vl, byte_offset)
+        # SEW8: ff_tail_index = 1, 2, 3, 5, 7, 9, 11, 13, 15
+        (np.uint8, 0b000, 1, 1),
+        (np.uint8, 0b000, 2, 2),
+        (np.uint8, 0b000, 3, 3),
+        (np.uint8, 0b000, 5, 1),
+        (np.uint8, 0b000, 7, 7),
+        (np.uint8, 0b000, 9, 3),
+        (np.uint8, 0b000, 11, 2),
+        (np.uint8, 0b000, 13, 1),
+        (np.uint8, 0b000, 15, 7),
+        # SEW16: ff_tail_index = 2, 6, 10, 14
+        (np.uint16, 0b000, 1, 1),
+        (np.uint16, 0b000, 3, 2),
+        (np.uint16, 0b000, 5, 3),
+        (np.uint16, 0b000, 7, 7),
+        # SEW32: ff_tail_index = 4, 8, 12
+        (np.uint32, 0b000, 1, 1),
+        (np.uint32, 0b000, 2, 2),
+        (np.uint32, 0b000, 3, 3),
+    ]
+
+    alignment_tests = list(itertools.product([False, True], alignment_cases))
+    load_data_base_tcm = fixture.symbols['load_data']
+    for use_axi, (dtype, lmul, vl, byte_offset) in tqdm.tqdm(
+            alignment_tests, desc="load_unit_ff unaligned_and_lengths"):
+        vtype = construct_vtype(0, 0, DTYPE_TO_SEW[dtype], lmul)
+        min_value = np.iinfo(dtype).min
+        max_value = np.iinfo(dtype).max + 1
+        load_data = rng.integers(min_value, max_value, vl, dtype=dtype)
+        load_filler = np.iinfo(dtype).max
+        load_data_bytes = load_data.view(np.uint8)
+
+        if use_axi:
+            load_addr = fixture.core_mini_axi.memory_base_addr + byte_offset
+            fixture.core_mini_axi.memory[byte_offset:byte_offset +
+                                         len(load_data_bytes)
+                                         ] = load_data_bytes
+        else:
+            load_addr = load_data_base_tcm + byte_offset
+            await fixture.core_mini_axi.write(load_addr, load_data)
+
+        await fixture.write_word('load_addr', load_addr)
+        await fixture.write_ptr('impl', dtype_to_unmasked_function[dtype])
+        await fixture.write_word('vl', vl)
+        await fixture.write_word('load_filler', load_filler)
+        await fixture.write_word('vtype', vtype)
+
+        await fixture.run_to_halt()
+
+        actual_output = (
+            await fixture.read('store_data',
+                               vl * np.dtype(dtype).itemsize)
+        ).view(dtype)
+
+        assert np.array_equal(
+            load_data, actual_output
+        ), f"unaligned mismatch at vl={vl}, offset={byte_offset}, dtype={dtype}, axi={use_axi}"
+
+
+@cocotb.test()
 async def store_unit_masked(dut):
     """Test masked unit stores."""
     fixture = await Fixture.Create(dut)
@@ -3063,6 +3313,7 @@ async def _setup_lsu_fault_fixture(dut):
             'faulting_insn_seg3',
             'faulting_insn_seg5',
             'faulting_insn_load',
+            'faulting_insn_vleff',
             'faulting_insn_scalar_mixed',
             'faulting_insn_scalar_scalar',
             'run_scalar_fault_preserves_vstart',
@@ -3072,6 +3323,7 @@ async def _setup_lsu_fault_fixture(dut):
             'run_seg3_negative_stride_mid_vstart_fault',
             'run_seg5_negative_stride_mid_vstart_fault',
             'run_vector_load_fault_rs_flush',
+            'run_vleff_fault_rs_flush',
             'run_scalar_mixed_fault_rs_flush',
             'run_scalar_to_scalar_fault_rs_flush',
         ],
@@ -3229,6 +3481,21 @@ async def lsu_fault_vector_load_rs_flush(dut):
         expected_mcause=5,
         expected_mtval=0xA0000000,
         expected_vstart=0,
+    )
+
+
+@cocotb.test()
+async def lsu_fault_vleff_rs_flush(dut):
+    """Testbench to verify fault-only-first load fault on element 0 purges follow-on scalar store and raises exception."""
+    fixture = await _setup_lsu_fault_fixture(dut)
+    await _run_and_verify_lsu_fault(
+        fixture,
+        test_fn_symbol='run_vleff_fault_rs_flush',
+        faulting_insn_symbol='faulting_insn_vleff',
+        expected_mcause=5,
+        expected_mtval=0xA0000000,
+        expected_vstart=0,
+        vl=16,
     )
 
 

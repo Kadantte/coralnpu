@@ -118,8 +118,12 @@ object GenerateCoreShimSource {
             |    input [4:0] lsu2rvv_GENI_bits_addr,
             |    input [VLEN-1:0] lsu2rvv_GENI_bits_data,
             |    input  lsu2rvv_GENI_bits_last,
+            |    input [TAIL_IDX_BITS:0] lsu2rvv_GENI_bits_ff_tail_index,
             |    output lsu2rvv_GENI_ready,
-            |""".stripMargin.replaceAll("GENI", i.toString).replaceAll("VLEN", vlen.toString)
+            |""".stripMargin
+        .replaceAll("GENI", i.toString)
+        .replaceAll("VLEN", vlen.toString)
+        .replaceAll("TAIL_IDX_BITS", (log2Ceil(vlen / 8 + 1) - 1).toString)
     }
 
     if (p.enableVme) {
@@ -330,13 +334,17 @@ object GenerateCoreShimSource {
       |  logic  [2-1:0][4:0]  uop_lsu_addr_lsu2rvv;
       |  logic  [2-1:0][VLEN-1:0] uop_lsu_wdata_lsu2rvv;
       |  logic  [2-1:0] uop_lsu_last_lsu2rvv;
-      |  logic  [2-1:0] uop_lsu_ready_rvv2lsu;""".stripMargin.replaceAll("VLEN", vlen.toString)
+      |  logic  [2-1:0][TAIL_IDX_BITS:0] uop_lsu_ff_tail_index_lsu2rvv;
+      |  logic  [2-1:0] uop_lsu_ready_rvv2lsu;""".stripMargin
+      .replaceAll("VLEN", vlen.toString)
+      .replaceAll("TAIL_IDX_BITS", (log2Ceil(vlen / 8 + 1) - 1).toString)
     for (i <- 0 until 2) {
       coreInstantiation += """
           |  assign uop_lsu_valid_lsu2rvv[GENI] = lsu2rvv_GENI_valid;
           |  assign uop_lsu_addr_lsu2rvv[GENI] = lsu2rvv_GENI_bits_addr;
           |  assign uop_lsu_wdata_lsu2rvv[GENI] = lsu2rvv_GENI_bits_data;
           |  assign uop_lsu_last_lsu2rvv[GENI] = lsu2rvv_GENI_bits_last;
+          |  assign uop_lsu_ff_tail_index_lsu2rvv[GENI] = lsu2rvv_GENI_bits_ff_tail_index;
           |  assign lsu2rvv_GENI_ready = uop_lsu_ready_rvv2lsu[GENI];
           |""".stripMargin.replaceAll("GENI", i.toString)
     }
@@ -415,6 +423,7 @@ object GenerateCoreShimSource {
         |      .uop_lsu_addr_lsu2rvv(uop_lsu_addr_lsu2rvv),
         |      .uop_lsu_wdata_lsu2rvv(uop_lsu_wdata_lsu2rvv),
         |      .uop_lsu_last_lsu2rvv(uop_lsu_last_lsu2rvv),
+        |      .uop_lsu_ff_tail_index_lsu2rvv(uop_lsu_ff_tail_index_lsu2rvv),
         |      .uop_lsu_ready_rvv2lsu(uop_lsu_ready_rvv2lsu),
         |      .vcsr_valid(vcsr_valid),
         |      .vector_csr(vector_csr),

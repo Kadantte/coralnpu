@@ -209,6 +209,23 @@ __attribute__((used, retain)) void run_scalar_to_scalar_fault_rs_flush() {
         [bad_addr2] "r"(data_start_offset(-8)));
 }
 
+// 10. Fault-only-first Vector Load fault with Scalar Store at RS head (vle8ff fault on element 0)
+__attribute__((used, retain)) void run_vleff_fault_rs_flush() {
+  uint32_t a = 12345678, b = 7, div_res;
+  vuint8m1_t v = __riscv_vmv_v_x_u8m1(0xaa, 16);
+  asm volatile(
+      "div %[div_res], %[a], %[b] \n"
+      "vsetvli zero, %[vl], e8, m1, ta, ma \n"
+      ".globl faulting_insn_vleff \n"
+      "faulting_insn_vleff: \n"
+      "vle8ff.v %[v], 0(%[bad_addr1]) \n"
+      "sw %[val], 0(%[bad_addr2]) \n"
+      : [div_res] "=&r"(div_res), [v] "+vr"(v)
+      : [a] "r"(a), [b] "r"(b), [val] "r"(0xdeadbeef), [bad_addr1] "r"((uint8_t *)0xA0000000),
+        [bad_addr2] "r"((uint8_t *)0xA0000000), [vl] "r"(vl)
+      : "vl", "vtype");
+}
+
 void (*test_fn)() __attribute__((section(".data"))) = &run_scalar_fault_preserves_vstart;
 }
 

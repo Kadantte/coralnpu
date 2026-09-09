@@ -16,19 +16,132 @@
 #
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 
 def coralnpu_repos():
     http_archive(
+        name = "uvm",
+        urls = ["https://github.com/chipsalliance/uvm-verilator/archive/5a37baacfed0722b523b05decc9b94fe3e9efbe4.tar.gz"],
+        sha256 = "2c5b24ac5d6527824ca62f30c0c6695e4779481ad835d84a9ad1da85300a1b27",
+        strip_prefix = "uvm-verilator-5a37baacfed0722b523b05decc9b94fe3e9efbe4",
+        build_file_content = """
+filegroup(
+    name = "uvm_src",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+""",
+    )
+
+    http_archive(
         name = "bazel_skylib",
-        sha256 = "b8a1527901774180afc798aeb28c4634bdccf19c4d98e7bdd1ce79d1fe9aaad7",
+        sha256 = "3b5b49006181f5f8ff626ef8ddceaa95e9bb8ad294f7b5d7b11ea9f7ddaf8c59",
         urls = [
-            "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.4.1/bazel-skylib-1.4.1.tar.gz",
-            "https://github.com/bazelbuild/bazel-skylib/releases/download/1.4.1/bazel-skylib-1.4.1.tar.gz",
+            "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
+            "https://github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
         ],
     )
 
+    http_archive(
+        name = "com_google_absl",
+        urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20260526.0.tar.gz"],
+        sha256 = "6e1aee535473414164bf83e4ebc40240dec71a4701f8a642d906e95bea1aea0c",
+        strip_prefix = "abseil-cpp-20260526.0",
+    )
+
+    http_archive(
+        name = "com_google_googletest",
+        sha256 = "7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926",
+        strip_prefix = "googletest-1.15.2",
+        urls = [
+            "https://github.com/google/googletest/releases/download/v1.15.2/googletest-1.15.2.tar.gz",
+        ],
+    )
+
+    http_archive(
+        name = "rules_java",
+        urls = [
+            "https://github.com/bazelbuild/rules_java/releases/download/8.14.0/rules_java-8.14.0.tar.gz",
+        ],
+        sha256 = "bbe7d94360cc9ed4607ec5fd94995fd1ec41e84257020b6f09e64055281ecb12",
+    )
+
+    http_archive(
+        name = "com_google_protobuf",
+        strip_prefix = "protobuf-35.1",
+        sha256 = "f0b6838e7522a8da96126d487068c959bc624926368f3024ac8fd03abd0a1ac4",
+        url = "https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protobuf-35.1.tar.gz",
+        repo_mapping = {
+            "@abseil-cpp": "@com_google_absl",
+        },
+    )
+
+    http_archive(
+        name = "com_googlesource_code_re2",
+        sha256 = "87f6029d2f6de8aa023654240a03ada90e876ce9a4676e258dd01ea4c26ffd67",
+        strip_prefix = "re2-2025-11-05",
+        url = "https://github.com/google/re2/releases/download/2025-11-05/re2-2025-11-05.tar.gz",
+        repo_mapping = {
+            "@abseil-cpp": "@com_google_absl",
+        },
+    )
+
+    http_archive(
+        name = "rules_pkg",
+        urls = [
+            "https://github.com/bazelbuild/rules_pkg/releases/download/1.2.0/rules_pkg-1.2.0.tar.gz",
+        ],
+        sha256 = "b5c9184a23bb0bcff241981fd9d9e2a97638a1374c9953bb1808836ce711f990",
+    )
+
+    http_archive(
+        name = "rules_proto",
+        urls = ["https://github.com/bazelbuild/rules_proto/releases/download/7.1.0/rules_proto-7.1.0.tar.gz"],
+        sha256 = "14a225870ab4e91869652cfd69ef2028277fc1dc4910d65d353b62d6e0ae21f4",
+        strip_prefix = "rules_proto-7.1.0",
+    )
+
+    http_archive(
+        name = "rules_python",
+        sha256 = "690e0141724abb568267e003c7b6d9a54925df40c275a870a4d934161dc9dd53",
+        strip_prefix = "rules_python-0.40.0",
+        url = "https://github.com/bazelbuild/rules_python/releases/download/0.40.0/rules_python-0.40.0.tar.gz",
+        patches = ["@coralnpu_hw//rules:rules_python_airgap.patch"],
+        patch_args = ["-p0"],
+    )
+
+    http_archive(
+        name = "pybind11_bazel",
+        urls = ["https://github.com/pybind/pybind11_bazel/releases/download/v2.13.6/pybind11_bazel-2.13.6.tar.gz"],
+        strip_prefix = "pybind11_bazel-2.13.6",
+        sha256 = "cae680670bfa6e82703c03f2a3c995408cdcbf43616d7bdd198ef45d3c327731",
+    )
+
+    http_archive(
+        name = "freertos",
+        urls = ["https://github.com/FreeRTOS/FreeRTOS-Kernel/archive/refs/tags/V11.1.0.tar.gz"],
+        sha256 = "0e21928b3bcc4f9bcaf7333fb1c8c0299d97e2ec9e13e3faa2c5a7ac8a3bc573",
+        strip_prefix = "FreeRTOS-Kernel-11.1.0",
+        build_file = "@coralnpu_hw//third_party/freertos:freertos.BUILD",
+    )
+
+def coralnpu_repos2():
+    """Coralnpu repos are split into two functions; this is to import repositories in order"""
+
+    http_archive(
+        name = "pybind11",
+        build_file = "@pybind11_bazel//:pybind11-BUILD.bazel",
+        strip_prefix = "pybind11-3.0.1",
+        urls = ["https://github.com/pybind/pybind11/archive/v3.0.1.zip"],
+        sha256 = "20fb420fe163d0657a262a8decb619b7c3101ea91db35f1a7227e67c426d4c7e",
+    )
+    http_archive(
+        name = "pybind11_abseil",
+        strip_prefix = "pybind11_abseil-54b34dd0e8afb8a4febb9508c69410e708b43515",
+        urls = ["https://github.com/pybind/pybind11_abseil/archive/54b34dd0e8afb8a4febb9508c69410e708b43515.tar.gz"],
+        sha256 = "26328a74f367208ae8d490dc640030111df4ba0869619c6445bb4a1c5964e2a7",
+    )
     http_archive(
         name = "rules_hdl",
         sha256 = "1b560fe7d4100486784d6f2329e82a63dd37301e185ba77d0fd69b3ecc299649",
@@ -37,24 +150,38 @@ def coralnpu_repos():
             "https://github.com/hdl/bazel_rules_hdl/archive/7a1ba0e8d229200b4628e8a676917fc6b8e165d1.tar.gz",
         ],
         patches = [
-            "@coralnpu_hw//external:0001-Use-systemc-in-verilator-and-support-verilator-in-co.patch",
-            "@coralnpu_hw//external:0002-Update-cocotb-script-to-support-newer-version.patch",
-            "@coralnpu_hw//external:0003-Export-vdb-via-undeclared-test-outputs.patch",
-            "@coralnpu_hw//external:0004-More-jobs-for-cocotb.patch",
-            "@coralnpu_hw//external:0005-Use-num_failed-for-exit-code.patch",
-            "@coralnpu_hw//external:0006-Separate-build-from-test-for-Verilator.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0001-Use-systemc-in-verilator-and-support-verilator-in-co.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0002-Update-cocotb-script-to-support-newer-version.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0003-Export-vdb-via-undeclared-test-outputs.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0004-More-jobs-for-cocotb.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0005-Use-num_failed-for-exit-code.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0006-Separate-build-from-test-for-Verilator.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0007-Suppress-skywater-pdk-loading.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0008-Use-glob-for-verilator_bin-data-files.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0009-Suppress-Verilator-C-warnings.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0010-Fix-ParseDict-to-handle-space-separated-lists.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0011-Support-location-expansion-in-build-args.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0012-Fix-runfiles-collection-for-direct-files.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0013-Support-pre-compiled-VCS-models.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0014-Remove-deprecated-path-attr-from-bison-filegroup.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0015-Use-short_path-for-python-runfiles-resolution.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0016-Add-V3AstNodeStmt-and-V3Dfg-gen-clone-cases-to-verilator.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0017-Clean-up-WAVES-env-var-to-avoid-spurious-traces.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0018-Fix-python-runfiles-resolution-for-manifest-only.patch",
+            # Patch 0019 injects a python runfiles fix (via PYTHONPATH/sitecustomize.py)
+            # to resolve ValueError crashes during manifest-only/unsandboxed runs.
+            # See third_party/python_runfiles_fix/sitecustomize.py for a detailed explanation.
+            # Can be removed when rules_hdl supports manifest-only runs natively.
+            "@coralnpu_hw//third_party/rules_hdl:0019-Inject-python-runfiles-fix-to-PYTHONPATH.patch",
         ],
         patch_args = ["-p1"],
     )
 
-    # See https://github.com/bazelbuild/rules_scala/releases for up to date version information.
-    rules_scala_version = "73719cbf88134d5c505daf6c913fe4baefd46917"
     http_archive(
         name = "io_bazel_rules_scala",
-        sha256 = "48124dfd3387c72fd13d3d954b246a5c34eb83646c0c04a727c9a1ba98e876a6",
-        strip_prefix = "rules_scala-%s" % rules_scala_version,
-        type = "zip",
-        url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % rules_scala_version,
+        sha256 = "e734eef95cf26c0171566bdc24d83bd82bdaf8ca7873bec6ce9b0d524bdaf05d",
+        strip_prefix = "rules_scala-6.6.0",
+        url = "https://github.com/bazelbuild/rules_scala/releases/download/v6.6.0/rules_scala-v6.6.0.tar.gz",
     )
 
     http_archive(
@@ -69,15 +196,6 @@ def coralnpu_repos():
         urls = ["https://repo1.maven.org/maven2/org/chipsalliance/llvm-firtool/1.114.0/llvm-firtool-1.114.0.jar"],
         build_file = "@coralnpu_hw//third_party/llvm-firtool:BUILD.bazel",
         sha256 = "f93a831e6b5696df2e3327626df3cc183e223bf0c9c0fddf9ae9e51f502d0492",
-    )
-
-    http_archive(
-        name = "com_github_grpc_grpc",
-        urls = [
-            "https://github.com/grpc/grpc/archive/v1.58.0.tar.gz",
-        ],
-        strip_prefix = "grpc-1.58.0",
-        sha256 = "ec64fdab22726d50fc056474dd29401d914cc616f53ab8f2fe4866772881d581",
     )
 
     http_archive(
@@ -108,32 +226,56 @@ exports_files(["diplomacy/src/diplomacy/nodes/HeterogeneousBag.scala"])
         """,
     )
 
-def renode_repos():
     http_archive(
-        name = "renode",
-        sha256 = "ca98b8df2ed09e225b72f35c616c85207e451d8a4b00d96594064e5065493cf1",
-        strip_prefix = "renode_1.15.2_source",
-        urls = ["https://github.com/renode/renode/releases/download/v1.15.2/renode_1.15.2_source.tar.xz"],
-        build_file = "@coralnpu_hw//third_party/renode:BUILD.bazel",
+        name = "srecord",
+        urls = ["https://sourceforge.net/projects/srecord/files/srecord/1.65/srecord-1.65.0-Source.tar.gz/download"],
+        type = "tar.gz",
+        sha256 = "81c3d07cf15ce50441f43a82cefd0ac32767c535b5291bcc41bd2311d1337644",
+        strip_prefix = "srecord-1.65.0-Source",
+        build_file = "@coralnpu_hw//third_party/srecord:srecord.BUILD",
         patches = [
-            "@coralnpu_hw//third_party/renode:0001-Tweaks-to-AXI.patch",
-            "@coralnpu_hw//third_party/renode:0002-AXI-S-fixups.patch",
-            "@coralnpu_hw//third_party/renode:0003-Invert-AXI-reset-polarity.patch",
+            "@coralnpu_hw//third_party/srecord:0001-Disable-docs-and-tests.patch",
         ],
         patch_args = ["-p1"],
+    )
+
+    http_archive(
+        name = "riscv-tests",
+        urls = ["https://github.com/riscv-software-src/riscv-tests/archive/fd4e6cdd033d9075632be9dd207c848181ca474c.zip"],
+        sha256 = "e7d84eaa149b57c0e5ff69a76c80f35f4ee64c5dc985dbba5c287adf8b56ec5d",
+        strip_prefix = "riscv-tests-fd4e6cdd033d9075632be9dd207c848181ca474c",
+        patches = [
+            "@coralnpu_hw//third_party/riscv-tests:0001-Find-env-from-environment.patch",
+        ],
+        patch_args = ["-p1"],
+        build_file_content = """
+package(default_visibility = ["//visibility:public"])
+exports_files(glob(["**"]))
+filegroup(
+    name = "all_srcs",
+    srcs = glob([
+        "**/*",
+    ]),
+)
+        """,
     )
 
 def cvfpu_repos():
     http_archive(
         name = "cvfpu",
-        sha256 = "fe9278105886ed23ee889c58b2c28f89732e06a0d12f7fa4a8ce60dd680290f6",
-        urls = ["https://github.com/openhwgroup/cvfpu/archive/refs/tags/v0.8.1.zip"],
+        urls = ["https://github.com/openhwgroup/cvfpu/archive/bb65bdedd07711dfd41c621382f940a5cbb93046.zip"],
+        sha256 = "0723e6a6feb8e033679d2f9145f99ee4fb26c80e67b3662a8eec9b61bd30f6cc",
         build_file = "@coralnpu_hw//third_party/cvfpu:BUILD.bazel",
-        strip_prefix = "cvfpu-0.8.1",
+        strip_prefix = "cvfpu-bb65bdedd07711dfd41c621382f940a5cbb93046",
         patches = [
             "@coralnpu_hw//third_party/cvfpu:0001-Fix-max_num_lanes-issue-in-DC.patch",
             "@coralnpu_hw//third_party/cvfpu:0002-Remove-SVH-includes.patch",
             "@coralnpu_hw//third_party/cvfpu:0003-Fill-in-unreachable-state-in-fpnew_divsqrt_th_32-fsm.patch",
+            "@coralnpu_hw//third_party/cvfpu:0004-Remove-ternary-operator-from-pkg-causing-dc-crash.patch",
+            "@coralnpu_hw//third_party/cvfpu:0005-Fix-fsm-complete.patch",
+            "@coralnpu_hw//third_party/cvfpu:0006-Fix-syn-tool-compatibility-issues.patch",
+            "@coralnpu_hw//third_party/cvfpu:0007-Fix-nan-boxing-divsqrt.patch",
+            "@coralnpu_hw//third_party/cvfpu:0008-Fix-num-lanes-multifmt-slice.patch",
         ],
         patch_args = ["-p1"],
     )
@@ -171,13 +313,25 @@ def rvvi_repos():
 def fpga_repos():
     http_archive(
         name = "lowrisc_opentitan_gh",
-        urls = ["https://github.com/lowRISC/opentitan/archive/1b1945fd76799666156f817e163222725c518c59.zip"],
-        sha256 = "b881378cdffee2284a88c2032c9fb13e68c889f1cac38cf715b0cff7b40fcf7e",
-        strip_prefix = "opentitan-1b1945fd76799666156f817e163222725c518c59",
+        urls = ["https://github.com/lowRISC/opentitan/archive/0e3cf62211004443d6d29f8f6120882376da499a.zip"],
+        sha256 = "5de3d4ba7a2d02ea58f189f0d9bc46051368dc138a7f8c0fb89af78dcd43a0f8",
+        strip_prefix = "opentitan-0e3cf62211004443d6d29f8f6120882376da499a",
         patches = [
             "@coralnpu_hw//fpga:0001-Export-hw-ip_templates.patch",
+            "@coralnpu_hw//fpga:0002-Use-hermetic-verilator-in-fusesoc-build.patch",
+            "@coralnpu_hw//fpga:0003-Support-vivado-elab-in-fusesoc-build.patch",
         ],
         patch_args = ["-p1"],
+    )
+
+    http_archive(
+        name = "ispyocto",
+        urls = ["https://opensecura.googlesource.com/3p/ip/isp/+archive/d53dc0e0ce2605cea2e3b3fc5b97e9dd40f8d55a.tar.gz"],
+        build_file = "@coralnpu_hw//fpga/ip/ispyocto:ispyocto.BUILD",
+        sha256 = "",
+        patch_cmds = [
+            "rm -f ispyocto/BUILD axi2sramcrs/BUILD ispyocto/rtl/ispyocto_filelist.txt",
+        ],
     )
 
 def tflite_repos():
@@ -200,18 +354,65 @@ def tflite_repos():
         url = "https://github.com/hedronvision/bazel-compile-commands-extractor/archive/1266d6a25314d165ca78d0061d3399e909b7920e.tar.gz",
     )
 
-    maybe(
-        http_archive,
-        name = "rules_python",
-        sha256 = "9d04041ac92a0985e344235f5d946f71ac543f1b1565f2cdbc9a2aaee8adf55b",
-        strip_prefix = "rules_python-0.26.0",
-        url = "https://github.com/bazelbuild/rules_python/archive/refs/tags/0.26.0.tar.gz",
+def mpact_repos():
+    http_archive(
+        name = "com_google_mpact-riscv",
+        sha256 = "38faef26745f34a82de0daf3b65a207c8d2ecf825f37484a4a27132512583574",
+        strip_prefix = "mpact-riscv-cb68bd4a2cb80dea24d9760dc6397b5854ea41bd",
+        url = "https://github.com/google/mpact-riscv/archive/cb68bd4a2cb80dea24d9760dc6397b5854ea41bd.tar.gz",
+        patches = [
+            "@coralnpu_hw//third_party:mpact-riscv-openat.patch",
+            "@coralnpu_hw//third_party/patches:mpact_riscv_vector_memory.patch",
+            "@coralnpu_hw//third_party/patches:mpact_riscv_vstart_trap.patch",
+            "@coralnpu_hw//third_party/patches:mpact_riscv_vrgather.patch",
+            "@coralnpu_hw//third_party/patches:mpact_riscv_fma_underflow.patch",
+            "@coralnpu_hw//third_party/patches:mpact_riscv_rmm_helpers.patch",
+            "@coralnpu_hw//third_party/patches:mpact_riscv_rmm_f_instructions.patch",
+        ],
+        patch_args = ["-p1"],
     )
 
-    maybe(
-        http_archive,
-        name = "pybind11_bazel",
-        strip_prefix = "pybind11_bazel-faf56fb3df11287f26dbc66fdedf60a2fc2c6631",
-        urls = ["https://github.com/pybind/pybind11_bazel/archive/faf56fb3df11287f26dbc66fdedf60a2fc2c6631.zip"],
-        sha256 = "a185aa68c93b9f62c80fcb3aadc3c83c763854750dc3f38be1dadcb7be223837",
+    http_archive(
+        name = "coralnpu_mpact",
+        urls = ["https://github.com/google-coral/coralnpu-mpact/archive/e2a26e6d983f13d4c10875e4e5878a6171c04a06.zip"],
+        sha256 = "426328af9681929b262147538e61c7b6545bebf70e4db2d483c94d9613ac5909",
+        strip_prefix = "coralnpu-mpact-e2a26e6d983f13d4c10875e4e5878a6171c04a06",
+        workspace_file = "@coralnpu_hw//third_party/coralnpu_mpact:WORKSPACE",
+        patches = ["@coralnpu_hw//third_party/coralnpu_mpact:0002-Patch-mpact_riscv-WORKSPACE.patch"],
+        patch_args = ["-p1"],
+    )
+
+def uvm_verilator_repos():
+    git_repository(
+        name = "uvm-verilator",
+        remote = "https://github.com/chipsalliance/uvm-verilator",
+        tag = "uvm-1.2",
+        build_file_content = """
+package(default_visibility = ["//visibility:public"])
+exports_files(glob(["**/*"]))
+filegroup(
+    name = "all_srcs",
+    srcs = glob([
+        "**/*",
+    ]),
+)
+        """,
+        patch_cmds = [
+            "git fetch --all",
+            "git cherry-pick -n --strategy=recursive -X theirs 5a37baacfed0722b523b05decc9b94fe3e9efbe4",
+        ],
+    )
+
+    http_file(
+        name = "cc_static_library_external",
+        downloaded_file_path = "cc_static_libarary.bzl",
+        sha256 = "1287ce9f7e5fe31ad1b5937781531e4ab3f4656edabf650cca9ca720ceb31806",
+        urls = ["https://raw.githubusercontent.com/project-oak/oak/fcceea755f0274d3a0eb7c0461b30af3dc28e40a/cc/build_defs.bzl"],
+    )
+
+    http_file(
+        name = "svdpi_h_file",
+        downloaded_file_path = "svdpi.h",
+        sha256 = "2528c8e529b66dd8e795c8a0fee326166cc51f7dee8fc6a0c6c930534fc780a6",
+        urls = ["https://raw.githubusercontent.com/verilator/verilator/v5.028/include/vltstd/svdpi.h"],
     )

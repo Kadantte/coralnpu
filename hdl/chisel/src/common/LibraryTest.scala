@@ -42,9 +42,9 @@ class Zip32Tester extends Module {
 
 class RotateVectorLeftTester extends Module {
   val io = IO(new Bundle {
-    val in = Input(Vec(16, Valid(UInt(32.W))))
+    val in    = Input(Vec(16, Valid(UInt(32.W))))
     val shift = Input(UInt(4.W))
-    val out = Output(Vec(16, Valid(UInt(32.W))))
+    val out   = Output(Vec(16, Valid(UInt(32.W))))
   })
 
   io.out := RotateVectorLeft(io.in, io.shift)
@@ -52,9 +52,9 @@ class RotateVectorLeftTester extends Module {
 
 class RotateVectorRightTester extends Module {
   val io = IO(new Bundle {
-    val in = Input(Vec(16, Valid(UInt(32.W))))
+    val in    = Input(Vec(16, Valid(UInt(32.W))))
     val shift = Input(UInt(4.W))
-    val out = Output(Vec(16, Valid(UInt(32.W))))
+    val out   = Output(Vec(16, Valid(UInt(32.W))))
   })
 
   io.out := RotateVectorRight(io.in, io.shift)
@@ -62,9 +62,9 @@ class RotateVectorRightTester extends Module {
 
 class ShiftVectorLeftTester extends Module {
   val io = IO(new Bundle {
-    val in = Input(Vec(16, Valid(UInt(32.W))))
+    val in    = Input(Vec(16, Valid(UInt(32.W))))
     val shift = Input(UInt(4.W))
-    val out = Output(Vec(16, Valid(UInt(32.W))))
+    val out   = Output(Vec(16, Valid(UInt(32.W))))
   })
 
   io.out := ShiftVectorLeft(io.in, io.shift)
@@ -72,64 +72,69 @@ class ShiftVectorLeftTester extends Module {
 
 class ShiftVectorRightTester extends Module {
   val io = IO(new Bundle {
-    val in = Input(Vec(16, Valid(UInt(32.W))))
+    val in    = Input(Vec(16, Valid(UInt(32.W))))
     val shift = Input(UInt(4.W))
-    val out = Output(Vec(16, Valid(UInt(32.W))))
+    val out   = Output(Vec(16, Valid(UInt(32.W))))
   })
 
   io.out := ShiftVectorRight(io.in, io.shift)
 }
 
 class LibrarySpec extends AnyFreeSpec with ChiselSim {
-  "ForceZero when invalid" in {
+  "ForceZero" in {
     simulate(new ForceZeroTester) { dut =>
-      dut.io.in.bits.poke(9001)
-      dut.io.in.valid.poke(0)
-      dut.clock.step()
-      dut.io.out.bits.expect(0)
+      // ForceZero when invalid
+      {
+        dut.io.in.bits.poke(9001)
+        dut.io.in.valid.poke(0)
+        dut.clock.step()
+        dut.io.out.bits.expect(0)
+      }
+
+      // ForceZero propogates when valid
+      {
+        dut.io.in.bits.poke(9001)
+        dut.io.in.valid.poke(1)
+        dut.clock.step()
+        dut.io.out.bits.expect(9001)
+      }
     }
   }
 
-  "ForceZeroForceZero propogates when valid" in {
-    simulate(new ForceZeroTester) { dut =>
-      dut.io.in.bits.poke(9001)
-      dut.io.in.valid.poke(1)
-      dut.clock.step()
-      dut.io.out.bits.expect(9001)
-    }
-  }
-
-  "Zip32 Words" in {
+  "Zip32" in {
     simulate(new Zip32Tester) { dut =>
-      dut.io.sz.poke(4)
-      dut.io.a.poke(5)
-      dut.io.b.poke(3163)
-      dut.io.out.expect((3163L << 32L) | 5)
-    }
-  }
+      // Zip32 Words
+      {
+        dut.io.sz.poke(4)
+        dut.io.a.poke(5)
+        dut.io.b.poke(3163)
+        dut.io.out.expect((3163L << 32L) | 5)
+      }
 
-  "Zip32 Halves" in {
-    simulate(new Zip32Tester) { dut =>
-      dut.io.sz.poke(2)
-      dut.io.a.poke((7L << 16L) | 3)
-      dut.io.b.poke((11L << 16L) | 5)
-      dut.io.out.expect((11L << 48L) | (7L << 32L) | (5L << 16L) | 3L)
-    }
-  }
+      // Zip32 Halves
+      {
+        dut.io.sz.poke(2)
+        dut.io.a.poke((7L << 16L) | 3)
+        dut.io.b.poke((11L << 16L) | 5)
+        dut.io.out.expect((11L << 48L) | (7L << 32L) | (5L << 16L) | 3L)
+      }
 
-  "Zip32 Bytes" in {
-    simulate(new Zip32Tester) { dut =>
-      dut.io.sz.poke(1)
-      dut.io.a.poke((37L << 16L) | (7L << 8L) | 3)
-      dut.io.b.poke((43L << 16L) | (11L << 8L) | 5)
-      dut.io.out.expect((43L << 40L) | (37L << 32L) | (11L << 24L) | (7L << 16L) | (5L << 8L) | 3L)
+      // Zip32 Bytes
+      {
+        dut.io.sz.poke(1)
+        dut.io.a.poke((37L << 16L) | (7L << 8L) | 3)
+        dut.io.b.poke((43L << 16L) | (11L << 8L) | 5)
+        dut.io.out.expect(
+          (43L << 40L) | (37L << 32L) | (11L << 24L) | (7L << 16L) | (5L << 8L) | 3L
+        )
+      }
     }
   }
 
   "RotateVectorLeft" in {
     simulate(new RotateVectorLeftTester) { dut =>
       val valids = Seq.fill(16)(Random.between(0, 2))
-      val data = Seq.fill(16)(Random.between(0, 2147483647))
+      val data   = Seq.fill(16)(Random.between(0, 2147483647))
       for (i <- 0 until 16) {
         dut.io.in(i).valid.poke(valids(i))
         dut.io.in(i).bits.poke(data(i))
@@ -153,7 +158,7 @@ class LibrarySpec extends AnyFreeSpec with ChiselSim {
   "RotateVectorRight" in {
     simulate(new RotateVectorRightTester) { dut =>
       val valids = Seq.fill(16)(Random.between(0, 2))
-      val data = Seq.fill(16)(Random.between(0, 2147483647))
+      val data   = Seq.fill(16)(Random.between(0, 2147483647))
       for (i <- 0 until 16) {
         dut.io.in(i).valid.poke(valids(i))
         dut.io.in(i).bits.poke(data(i))
@@ -177,7 +182,7 @@ class LibrarySpec extends AnyFreeSpec with ChiselSim {
   "ShiftVectorLeft" in {
     simulate(new ShiftVectorLeftTester) { dut =>
       val valids = Seq.fill(16)(Random.between(0, 2))
-      val data = Seq.fill(16)(Random.between(0, 2147483647))
+      val data   = Seq.fill(16)(Random.between(0, 2147483647))
       for (i <- 0 until 16) {
         dut.io.in(i).valid.poke(valids(i))
         dut.io.in(i).bits.poke(data(i))
@@ -205,7 +210,7 @@ class LibrarySpec extends AnyFreeSpec with ChiselSim {
   "ShiftVectorRight" in {
     simulate(new ShiftVectorRightTester) { dut =>
       val valids = Seq.fill(16)(Random.between(0, 2))
-      val data = Seq.fill(16)(Random.between(0, 2147483647))
+      val data   = Seq.fill(16)(Random.between(0, 2147483647))
       for (i <- 0 until 16) {
         dut.io.in(i).valid.poke(valids(i))
         dut.io.in(i).bits.poke(data(i))

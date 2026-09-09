@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("//rules:coralnpu_v2.bzl", "coralnpu_v2_binary")
+load("//rules:coralnpu_v2.bzl", "collect_coralnpu_elfs", "coralnpu_v2_binary")
 load("//rules:utils.bzl", "template_rule")
 
 package(default_visibility = ["//visibility:public"])
@@ -41,8 +41,17 @@ template_rule(
         "vfirst_test": {
             "srcs": ["vfirst_test.cc"],
         },
+        "vgather": {
+            "srcs": ["vgather.cc"],
+        },
+        "vrgather_test": {
+            "srcs": ["vrgather_test.cc"],
+        },
         "vill_test": {
             "srcs": ["vill_test.cc"],
+        },
+        "vill_whole_reg_test": {
+            "srcs": ["vill_whole_reg_test.cc"],
         },
         "viota_test": {
             "srcs": ["viota_test.cc"],
@@ -59,8 +68,44 @@ template_rule(
         "vsetvl_test": {
             "srcs": ["vsetvl_test.cc"],
         },
+        "vslide": {
+            "srcs": ["vslide.cc"],
+        },
+        "vslide_boundary_test": {
+            "srcs": ["vslide_boundary_test.cc"],
+        },
         "vstart_store": {
             "srcs": ["vstart_store.S"],
+        },
+        "vstart_test": {
+            "srcs": ["vstart_test.cc"],
+        },
+        "rvv_small_loop_test": {
+            "srcs": ["rvv_small_loop_test.S"],
+        },
+        "rvv_flush_race_test": {
+            "srcs": ["rvv_flush_race_test.S"],
+        },
+        "rvv_vill_loop_trap_test": {
+            "srcs": ["rvv_vill_loop_trap_test.S"],
+        },
+        "rvv_vstart_rob_test": {
+            "srcs": ["rvv_vstart_rob_test.S"],
+        },
+        "rvv_vstart_trap_flush_test": {
+            "srcs": ["rvv_vstart_trap_flush_test.S"],
+        },
+        "rvv_vstart_vmv_scalar_test": {
+            "srcs": ["rvv_vstart_vmv_scalar_test.S"],
+        },
+        "rvv_vstart_vset_test": {
+            "srcs": ["rvv_vstart_vset_test.S"],
+        },
+        "rvv_vfrdiv_test": {
+            "srcs": ["rvv_vfrdiv_test.S"],
+        },
+        "rvv_vleff_test": {
+            "srcs": ["rvv_vleff_test.S"],
         },
     },
 )
@@ -69,18 +114,35 @@ filegroup(
     name = "rvv_assem_tests",
     srcs = [
         "rvv_add.elf",
+        "rvv_flush_race_test.elf",
         "rvv_load.elf",
+        "rvv_small_loop_test.elf",
+        "rvv_vfrdiv_test.elf",
+        "rvv_vill_loop_trap_test.elf",
+        "rvv_vleff_test.elf",
+        "rvv_vstart_rob_test.elf",
+        "rvv_vstart_trap_flush_test.elf",
+        "rvv_vstart_vmv_scalar_test.elf",
+        "rvv_vstart_vset_test.elf",
         "vcompress_test.elf",
         "vcpop_exception_test.elf",
         "vcpop_test.elf",
         "vcsr_test.elf",
         "vfirst_test.elf",
+        "vgather.elf",
         "vill_test.elf",
+        "vill_whole_reg_test.elf",
         "viota_test.elf",
         "vmsbf_test.elf",
         "vmsif_test.elf",
         "vmsof_test.elf",
+        "vrgather_test.elf",
         "vsetvl_test.elf",
+        "vslide.elf",
+        "vslide_boundary_test.elf",
         "vstart_store.elf",
+        "vstart_test.elf",
     ],
 )
+
+collect_coralnpu_elfs()

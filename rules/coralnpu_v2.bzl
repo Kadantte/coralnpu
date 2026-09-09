@@ -12,9 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("//rules:linker.bzl", "generate_linker_script")
+load("//rules:uvm_denylist.bzl", "DENYLIST", "TIMEOUT_MAP", "is_uvm_denylisted")
+
 """Rules to build CoralNPU SW objects"""
 
 load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
+load("//rules:vcs.bzl", "vcs_batch_uvm_test")
+load("//rules:verilator.bzl", "verilator_batch_uvm_test")
 
 CORALNPU_V2_PLATFORM = "//platforms:coralnpu_v2"
 CORALNPU_V2_SEMIHOSTING_PLATFORM = "//platforms:coralnpu_v2_semihosting"
@@ -73,8 +78,6 @@ def _coralnpu_v2_binary_impl(ctx):
         containing the output ELF and BIN.
     """
     cc_toolchain = find_cc_toolchain(ctx)
-    if type(cc_toolchain) != 'CcToolchainInfo':
-        cc_toolchain = cc_toolchain.cc
     feature_configuration = cc_common.configure_features(
         ctx = ctx,
         cc_toolchain = cc_toolchain,
@@ -137,43 +140,61 @@ def _coralnpu_v2_binary_impl(ctx):
         mnemonic = "ObjCopy",
     )
 
-    out_vmem = ctx.actions.declare_file("{}.vmem".format(ctx.label.name))
-    word_size = ctx.attr.word_size
-    srec_cat_vmem_args = [
-        out_bin.path,
-        "-binary",
-        "-byte-swap",
-        str(word_size // 8),
-        "-fill",
-        "0xff",
-        "-within",
-        out_bin.path,
-        "-binary",
-        "-range-pad",
-        str(word_size // 8),
-        "-o",
-        out_vmem.path,
-        "-vmem",
-        str(word_size),
-    ]
-    ctx.actions.run(
-        outputs = [out_vmem],
-        inputs = [out_bin],
-        executable = "srec_cat",
-        arguments = srec_cat_vmem_args,
-        mnemonic = "SrecCat",
-    )
+    out_vmem = None
+    if ctx.attr.enable_vmem:
+        out_vmem = ctx.actions.declare_file("{}.vmem".format(ctx.label.name))
+        word_size = ctx.attr.word_size
+
+        srec_cat_files = ctx.attr._srec_cat[DefaultInfo].files.to_list()
+        srec_cat_bin = None
+        for f in srec_cat_files:
+            if f.path.endswith("/bin/srec_cat"):
+                srec_cat_bin = f
+                break
+        if not srec_cat_bin:
+            fail("Could not find srec_cat binary in @srecord//:srecord outputs")
+
+        ctx.actions.run(
+            outputs = [out_vmem],
+            inputs = [out_bin],
+            executable = srec_cat_bin,
+            tools = srec_cat_files,
+            arguments = [
+                out_bin.path,
+                "-binary",
+                "-byte-swap",
+                str(word_size // 8),
+                "-fill",
+                "0xff",
+                "-within",
+                out_bin.path,
+                "-binary",
+                "-range-pad",
+                str(word_size // 8),
+                "-o",
+                out_vmem.path,
+                "-vmem",
+                str(word_size),
+            ],
+            mnemonic = "SrecCat",
+        )
+
+    all_outputs = [linking_outputs.executable, out_bin]
+    output_groups = {
+        "all_files": depset(all_outputs),
+        "elf_file": depset([linking_outputs.executable]),
+        "bin_file": depset([out_bin]),
+    }
+    if out_vmem:
+        all_outputs.append(out_vmem)
+        output_groups["vmem_file"] = depset([out_vmem])
+        output_groups["all_files"] = depset(all_outputs)
 
     return [
         DefaultInfo(
-            files = depset([linking_outputs.executable, out_bin, out_vmem]),
+            files = depset(all_outputs),
         ),
-        OutputGroupInfo(
-            all_files = depset([linking_outputs.executable, out_bin, out_vmem]),
-            elf_file = depset([linking_outputs.executable]),
-            bin_file = depset([out_bin]),
-            vmem_file = depset([out_vmem]),
-        ),
+        OutputGroupInfo(**output_groups),
     ]
 
 _coralnpu_v2_binary = _coralnpu_v2_rule(
@@ -189,7 +210,9 @@ _coralnpu_v2_binary = _coralnpu_v2_rule(
         "linker_script_includes": attr.label_list(default = [], allow_files = True),
         "semihosting": attr.bool(),
         "word_size": attr.int(default = 32),
+        "enable_vmem": attr.bool(default = True),
         "_cc_toolchain": attr.label(default = Label("@bazel_tools//tools/cpp:current_cc_toolchain")),
+        "_srec_cat": attr.label(default = Label("@srecord//:srecord"), cfg = "exec"),
     },
     fragments = ["cpp"],
     toolchains = ["@rules_cc//cc:toolchain_type"],
@@ -200,20 +223,33 @@ def coralnpu_v2_binary(
         srcs,
         tags = [],
         semihosting = False,
-        linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm.ld",
+        itcm_size_kbytes = 8,
+        dtcm_size_kbytes = 32,
         word_size = 32,
+        linker_script = None,
+        stack_size_bytes = 128,
+        heap_size = "",
+        heap_location = "DTCM",
+        enable_vmem = True,
+        crt = None,
         **kwargs):
     """A helper macro for generating binary artifacts for the CoralNPU V2 core.
 
     This macro uses the coralnpu_v2 toolchain, libgloss-htif,
-    and coralnpu linker script to build coralnpu binaries.
+    and a generated coralnpu linker script to build coralnpu binaries.
 
     Args:
       name: The name of this rule.
       srcs: The c source files.
       tags: build tags.
       semihosting: Enable htif-style semihosting
-      linker_script: Linker script to construct the final binary.
+      itcm_size_kbytes: Size of ITCM in KBytes.
+      dtcm_size_kbytes: Size of DTCM in KBytes.
+      stack_size_bytes: Size of stack in bytes.
+      heap_size: Size of heap (e.g. "1K", "128M").
+      heap_location: Memory region for heap ("DTCM", "EXTMEM", "DDR").
+      enable_vmem: Whether to generate a VMEM file.
+      crt: Optional label for custom CRT. If not provided, uses default CRT.
       **kwargs: Additional arguments forward to cc_binary.
     Emits rules:
       filegroup              named: <name>.bin
@@ -223,8 +259,50 @@ def coralnpu_v2_binary(
     """
 
     deps = kwargs.pop("deps", [])
-    if not semihosting:
+    if crt != None:
+        if crt:
+            deps.append(crt)
+    elif semihosting:
+        deps.append("//toolchain/crt:crt_semihosting")
+    else:
         deps.append("//toolchain/crt")
+
+    # See cache_size_param/hw/coralnpu/toolchain/BUILD.bazel for default linker script.
+    if linker_script == None:
+        _DEFAULT_ITCM_SIZE_KBYTES = 8
+        _DEFAULT_DTCM_SIZE_KBYTES = 32
+        _DEFAULT_STACK_SIZE_BYTES = 128
+        _DEFAULT_HEAP_SIZE = ""
+        _DEFAULT_HEAP_LOCATION = "DTCM"
+
+        linker_script_suffix = ""
+        if itcm_size_kbytes != _DEFAULT_ITCM_SIZE_KBYTES or \
+           dtcm_size_kbytes != _DEFAULT_DTCM_SIZE_KBYTES or \
+           stack_size_bytes != _DEFAULT_STACK_SIZE_BYTES or \
+           heap_size != _DEFAULT_HEAP_SIZE or \
+           heap_location != _DEFAULT_HEAP_LOCATION:
+            linker_script_suffix = "_ITCM%dKB_DTCM%dKB_STACK%d_HEAP%s%s" % (
+                itcm_size_kbytes,
+                dtcm_size_kbytes,
+                stack_size_bytes,
+                heap_size,
+                heap_location,
+            )
+
+        linker_script_name = name + linker_script_suffix + "_linker_script"
+        linker_script_output_file = name + linker_script_suffix + ".ld"
+
+        generate_linker_script(
+            name = linker_script_name,
+            src = "@coralnpu_hw//toolchain:coralnpu_tcm.ld.tpl",
+            out = linker_script_output_file,
+            itcm_size_kbytes = itcm_size_kbytes,
+            dtcm_size_kbytes = dtcm_size_kbytes,
+            stack_size_bytes = stack_size_bytes,
+            heap_size = heap_size,
+            heap_location = heap_location,
+        )
+        linker_script = ":" + linker_script_output_file
 
     _coralnpu_v2_binary(
         name = name,
@@ -234,6 +312,7 @@ def coralnpu_v2_binary(
         tags = tags,
         deps = deps,
         word_size = word_size,
+        enable_vmem = enable_vmem,
         **kwargs
     )
 
@@ -257,3 +336,89 @@ def coralnpu_v2_binary(
         output_group = "bin_file",
         tags = tags,
     )
+
+def _get_canonical_name(target_name):
+    """Gets full canonical target name for rule.
+
+       Example: registers in tests/cocotb package returns "//tests/cocotb:registers"
+    """
+    return "//{}:{}".format(native.package_name(), target_name)
+
+def _is_uvm_test_target(rule):
+    """Predicate for UVM regression test material."""
+
+    # Handle coralnpu_v2_binary binary targets
+    if not rule["kind"] == "_coralnpu_v2_binary":
+        return False
+    if not rule.get("linker_script", "") == ":{}.ld".format(rule["name"]):
+        return False
+    canonical_label = _get_canonical_name(rule["name"])
+    if is_uvm_denylisted(canonical_label):
+        return False
+    return True
+
+def collect_coralnpu_elfs(tags = []):
+    """Generates Verilator UVM regression tests for all `coralnpu_v2_binary` output binaries.
+
+    Only includes targets that use the default (per-target) linker script, matching
+    the filter applied by utils/run_uvm_regression.py get_targets().
+
+    Args:
+      tags: build tags.
+    """
+    for rule in native.existing_rules().values():
+        if _is_uvm_test_target(rule):
+            elf = "{}.elf".format(rule["name"]) if not rule["name"].endswith(".elf") else rule["name"]
+            label_name = rule["name"]
+            canonical_label = _get_canonical_name(rule["name"])
+            verilator_batch_uvm_test(
+                name = "verilator_uvm_regression_{}".format(label_name),
+                model = "//tests/uvm:uvm_sim_verilator",
+                coralnpu_tests = [elf],
+                timeouts = [TIMEOUT_MAP.get(canonical_label, 100000)],
+                labels = [canonical_label],
+                run_spike = "//rules:uvm_run_spike_cosim",
+                tags = tags + ["verilator-uvm-regression", "verilator-uvm-regression-coralnpu-tests"],
+            )
+            vcs_batch_uvm_test(
+                name = "vcs_uvm_regression_{}".format(label_name),
+                model = "//tests/uvm:uvm_sim_vcs",
+                coralnpu_tests = [elf],
+                timeouts = [TIMEOUT_MAP.get(canonical_label, 100000)],
+                labels = [canonical_label],
+                run_spike = "//rules:uvm_run_spike_cosim",
+                tags = tags + ["vcs", "vcs-uvm-regression", "vcs-uvm-regression-coralnpu-tests"],
+            )
+
+def collect_coralnpu_riscv_tests(binaries = [], tags = []):
+    """Generates Verilator and VCS UVM regression tests for all binaries in the list.
+
+    Used specifically for third_party/riscv-tests.
+    All tests are tagged for regression execution.
+
+    Args:
+      binaries: List of binaries to test
+      tags: build tags.
+    """
+    for elf in set(binaries):
+        label_name = elf[:-len(".elf")] if elf.endswith(".elf") else elf
+        canonical_label = _get_canonical_name(label_name)
+        if not is_uvm_denylisted(canonical_label):
+            verilator_batch_uvm_test(
+                name = "verilator_uvm_regression_riscv_tests_{}".format(label_name),
+                model = "//tests/uvm:uvm_sim_verilator",
+                coralnpu_tests = [":{}".format(elf)],
+                timeouts = [TIMEOUT_MAP.get(canonical_label, 100000)],
+                labels = [canonical_label],
+                run_spike = "//rules:uvm_run_spike_cosim",
+                tags = tags + ["verilator-uvm-regression", "verilator-uvm-regression-riscv-tests"],
+            )
+            vcs_batch_uvm_test(
+                name = "vcs_uvm_regression_riscv_tests_{}".format(label_name),
+                model = "//tests/uvm:uvm_sim_vcs",
+                coralnpu_tests = [":{}".format(elf)],
+                timeouts = [TIMEOUT_MAP.get(canonical_label, 100000)],
+                labels = [canonical_label],
+                run_spike = "//rules:uvm_run_spike_cosim",
+                tags = tags + ["vcs", "vcs-uvm-regression", "vcs-uvm-regression-riscv-tests"],
+            )

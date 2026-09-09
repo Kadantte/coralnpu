@@ -12,133 +12,175 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Matrix Multiplication Test on CoralNPU FPGA Hardware."""
 
-import argparse
+import os
+import sys
 import numpy as np
-from elftools.elf.elffile import ELFFile
-from ftdi_spi_master import FtdiSpiMaster
 
-class MatmulRunner:
-    """Runs a matrix multiplication test on the CoralNPU hardware."""
+# To support execution without Bazel runfiles:
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
-    def __init__(self, elf_path, usb_serial, ftdi_port=1):
-        """
-        Initializes the MatmulRunner.
+from coralnpu_test_utils.fpga_test_fixture import FpgaTestFixture
+from sw.utils.metrics import log_matmul_metrics
 
-        Args:
-            elf_path: Path to the rvv_matmul.elf file.
-            usb_serial: USB serial number of the FTDI device.
-            ftdi_port: Port number of the FTDI device.
-        """
-        self.elf_path = elf_path
-        self.spi_master = FtdiSpiMaster(usb_serial, ftdi_port)
-        self.addr_lhs = None
-        self.addr_rhs = None
-        self.addr_result = None
-        self.entry_point = None
-        self._parse_elf()
+TEST_SHAPES = [
+    (16, 48, 16, "Standard 16x48x16 Baseline"),
+    (32, 64, 32, "Mid-size 32x64x32 Tile"),
+    (32, 128, 32, "Large 32x128x32 Max DTCM (131k MACs)"),
+]
 
-    def _parse_elf(self):
-        """Parses the ELF file to find symbol addresses and the entry point."""
-        print(f"Parsing ELF file: {self.elf_path}")
-        with open(self.elf_path, 'rb') as f:
-            elf = ELFFile(f)
-            self.entry_point = elf.header['e_entry']
-            symtab = elf.get_section_by_name('.symtab')
-            if not symtab:
-                raise ValueError("No symbol table found in ELF file.")
 
-            symbols = {
-                'lhs_input': 'addr_lhs',
-                'rhs_input': 'addr_rhs',
-                'result_output': 'addr_result'
-            }
-            for sym in symtab.iter_symbols():
-                if sym.name in symbols:
-                    addr = sym['st_value']
-                    setattr(self, symbols[sym.name], addr)
-                    print(f"  Found symbol '{sym.name}' at 0x{addr:x}")
+def run_matmul_test(fixture: FpgaTestFixture):
+    """Executes the matrix multiplication test logic on FPGA hardware across multiple shapes."""
+    core_freq_mhz = fixture.get_core_frequency_mhz()
+    core_freq_hz = fixture.get_core_frequency_hz()
 
-        if not all([self.addr_lhs, self.addr_rhs, self.addr_result]) or self.entry_point is None:
-            raise ValueError("Could not find all required symbols in ELF file.")
+    elf_file = (
+        "tests/cocotb/rvv/ml_ops/rvv_matmul_highmem.elf"
+        if fixture.highmem else "tests/cocotb/rvv/ml_ops/rvv_matmul.elf"
+    )
 
-    def _generate_data(self):
-        """Generates input matrices and a golden output matrix."""
-        # Dimensions from tests/cocotb/rvv/ml_ops/rvv_matmul.cc
-        k_lhs_rows = 16
-        k_rhs_cols = 16
-        k_inner = 48
+    print(
+        f"\n===================================================================="
+    )
+    print(f"CoralNPU FPGA RVV Matrix Multiplication Test Suite")
+    print(
+        f"FPGA Core Clock Frequency: {core_freq_mhz} MHz ({core_freq_hz:,} Hz)"
+    )
+    print(f"ELF Kernel: {elf_file}")
+    print(f"Target Hardware: {fixture.usb_serial}")
+    print(
+        f"====================================================================\n"
+    )
 
-        print("Generating test data...")
-        # Using int8 for the input matrices
-        self.lhs_input = np.random.randint(-128, 127, size=(k_lhs_rows, k_inner), dtype=np.int8)
-        self.rhs_input = np.random.randint(-128, 127, size=(k_inner, k_rhs_cols), dtype=np.int8)
+    # 1. Load ELF and lookup required symbols
+    fixture.load_elf_and_lookup_symbols(
+        elf_file,
+        symbols=[
+            "lhs_input", "rhs_input", "result_output", "lhs_rows", "rhs_cols",
+            "inner"
+        ],
+        verify=True,
+    )
 
-        # The C++ code performs the matmul as int8*int8 -> int32
-        # We need to cast the inputs to a wider type before multiplication to avoid overflow
-        golden_lhs = self.lhs_input.astype(np.int32)
-        golden_rhs = self.rhs_input.astype(np.int32)
-        self.golden_output = np.matmul(golden_lhs, golden_rhs)
-        print("Test data generated.")
+    passed_count = 0
 
-    def run_test(self):
-        """Executes the full matrix multiplication test flow."""
-        # TODO(atv): Re-enable this when toggling POR through FTDI doesn't break DDR.
-        # self.spi_master.device_reset()
-        self.spi_master.idle_clocking(20)
-        self._generate_data()
+    for lhs_rows, inner, rhs_cols, desc in TEST_SHAPES:
+        print(
+            f"\n--- Testing Shape: {desc} (M={lhs_rows}, K={inner}, N={rhs_cols}) ---"
+        )
 
-        # 1. Load ELF (without starting the core)
-        self.spi_master.load_elf(self.elf_path, start_core=False)
+        # 2. Generate random int8 input data & compute int32 golden output
+        lhs_input = np.random.randint(
+            -128, 127, size=(lhs_rows, inner), dtype=np.int8
+        )
+        rhs_input = np.random.randint(
+            -128, 127, size=(inner, rhs_cols), dtype=np.int8
+        )
+        golden_output = np.matmul(
+            lhs_input.astype(np.int32), rhs_input.astype(np.int32)
+        )
 
-        # 2. Load input matrices into memory
-        print(f"Loading LHS matrix ({self.lhs_input.nbytes} bytes) to 0x{self.addr_lhs:x}")
-        self.spi_master.load_data(self.lhs_input.tobytes(), self.addr_lhs)
+        # 3. Upload dimensions and input matrices to hardware
+        fixture.write("lhs_rows", lhs_rows)
+        fixture.write("rhs_cols", rhs_cols)
+        fixture.write("inner", inner)
+        fixture.write("lhs_input", lhs_input)
+        fixture.write("rhs_input", rhs_input.flatten(order="F"))
+        fixture.write("result_output", np.zeros_like(golden_output).flatten())
 
-        print(f"Loading RHS matrix ({self.rhs_input.nbytes} bytes) to 0x{self.addr_rhs:x}")
-        self.spi_master.load_data(self.rhs_input.flatten(order='F').tobytes(), self.addr_rhs)
+        # 4. Execute kernel and wait for core to halt
+        print(
+            f"Starting core execution for shape {lhs_rows}x{inner}x{rhs_cols}..."
+        )
+        if not fixture.run_to_halt():
+            raise RuntimeError(
+                f"TEST FAILED: Core did not halt within timeout for shape {lhs_rows}x{inner}x{rhs_cols}."
+            )
 
-        # 3. Start the core
-        self.spi_master.set_entry_point(self.entry_point)
-        self.spi_master.start_core()
+        # 5. Read back result matrix and verify against golden reference
+        result = fixture.read(
+            "result_output",
+            dtype=golden_output.dtype,
+            shape=golden_output.shape,
+        )
 
-        # 4. Wait for the core to halt
-        if not self.spi_master.poll_for_halt(timeout=20.0):
-            print("TEST FAILED: Core did not halt.")
-            return
-
-        # 5. Retrieve the output matrix
-        result_size_bytes = self.golden_output.nbytes
-        print(f"Reading result matrix ({result_size_bytes} bytes) from 0x{self.addr_result:x}")
-        result_data = self.spi_master.read_data(self.addr_result, result_size_bytes)
-
-        # 6. Compare with the golden result
-        result_array = np.frombuffer(result_data, dtype=self.golden_output.dtype)
-        result_array = result_array.reshape(self.golden_output.shape)
-
-        print("\nVerifying result...")
-        if np.array_equal(self.golden_output, result_array):
-            print("TEST PASSED!")
+        # 6. Verify result
+        if np.array_equal(golden_output, result):
+            print(
+                f"Shape {lhs_rows}x{inner}x{rhs_cols} PASSED! (Verified shape: {result.shape})"
+            )
         else:
-            print("TEST FAILED: Output does not match golden reference.")
-            print("Golden:\n", self.golden_output)
-            print("Received:\n", result_array)
+            print("Golden Reference:\n", golden_output)
+            print("Received Output:\n", result)
+            raise RuntimeError(
+                f"TEST FAILED: Output mismatch for shape {lhs_rows}x{inner}x{rhs_cols}."
+            )
 
+        # 7. Log performance metrics
+        cycles = fixture.get_cycle_count()
+        if cycles is not None:
+            macs = lhs_rows * inner * rhs_cols
+            latency_ms = (cycles / core_freq_hz) * 1000.0
+            macs_per_cycle = macs / cycles if cycles else 0.0
+            print(f"  Execution Cycles: {cycles:,} cycles")
+            print(
+                f"  Execution Latency: {latency_ms:.3f} ms (@ {core_freq_mhz} MHz)"
+            )
+            print(f"  Throughput:       {macs_per_cycle:.2f} MACs/cycle")
+            log_matmul_metrics(
+                fixture,
+                test_name=f"[FPGA] rvv_matmul_{lhs_rows}x{rhs_cols}x{inner}",
+                cycles=cycles,
+                lhs_rows=lhs_rows,
+                rhs_cols=rhs_cols,
+                inner=inner,
+            )
 
-def main():
-    parser = argparse.ArgumentParser(description="Run Matrix Multiplication test on CoralNPU.")
-    parser.add_argument("elf_file", help="Path to the rvv_matmul.elf file.")
-    parser.add_argument("--usb-serial", required=True, help="USB serial number of the FTDI device.")
-    parser.add_argument("--ftdi-port", type=int, default=1, help="Port number of the FTDI device.")
-    args = parser.parse_args()
+        passed_count += 1
 
-    try:
-        runner = MatmulRunner(args.elf_file, args.usb_serial, args.ftdi_port)
-        runner.run_test()
-    except (ValueError, FileNotFoundError) as e:
-        print(f"Error: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+    print(
+        f"\n===================================================================="
+    )
+    print(
+        f"ALL {passed_count}/{len(TEST_SHAPES)} MATMUL SHAPES PASSED ON FPGA HARDWARE ({core_freq_mhz} MHz)!"
+    )
+    print(
+        f"====================================================================\n"
+    )
+
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description=
+        "Run RVV Matrix Multiplication test on CoralNPU FPGA Hardware"
+    )
+    parser.add_argument(
+        "--usb-serial",
+        required=True,
+        help="USB serial of the FTDI device (e.g. Nexus-FTDI-12)."
+    )
+    parser.add_argument(
+        "--highmem",
+        action="store_true",
+        help="Use highmem CSR base address (0x200000)."
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=60.0,
+        help="Execution timeout in seconds."
+    )
+    args = parser.parse_args()
+
+    fixture = FpgaTestFixture.create(
+        usb_serial=args.usb_serial, highmem=args.highmem
+    )
+    fixture.default_timeout = args.timeout
+    run_matmul_test(fixture)

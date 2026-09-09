@@ -22,6 +22,7 @@ filesets:
     depend:
       - lowrisc:prim:all
       - lowrisc:prim_generic:all
+      - google:ip:ispyocto:0.1
     files:
       - __VERILOG_FILE__
     file_type: systemVerilogSource

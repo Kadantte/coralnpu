@@ -126,7 +126,6 @@ Before we start the program, let's also write inputs into DTCM. We can
 determine the location of a buffer using `lookup_symbol` and write to DTCM with
 `write`:
 
-
 ```diff
 @cocotb.test()
 async def core_mini_axi_tutorial(dut):
@@ -144,6 +143,7 @@ async def core_mini_axi_tutorial(dut):
       entry_point = await core_mini_axi.load_elf(f)
 +     inputs1_addr = core_mini_axi.lookup_symbol(f, "input1_buffer")
 +     inputs2_addr = core_mini_axi.lookup_symbol(f, "input2_buffer")
++     outputs_addr = core_mini_axi.lookup_symbol(f, "output_buffer")
 
 +   input1_data = np.arange(8, dtype=np.uint32)
 +   input2_data = 8994 * np.ones(8, dtype=np.uint32)
@@ -172,6 +172,7 @@ async def core_mini_axi_tutorial(dut):
       entry_point = await core_mini_axi.load_elf(f)
       inputs1_addr = core_mini_axi.lookup_symbol(f, "input1_buffer")
       inputs2_addr = core_mini_axi.lookup_symbol(f, "input2_buffer")
+      outputs_addr = core_mini_axi.lookup_symbol(f, "output_buffer")
 
     input1_data = np.arange(8, dtype=np.uint32)
     input2_data = 8994 * np.ones(8, dtype=np.uint32)
@@ -200,6 +201,7 @@ async def core_mini_axi_tutorial(dut):
       entry_point = await core_mini_axi.load_elf(f)
       inputs1_addr = core_mini_axi.lookup_symbol(f, "input1_buffer")
       inputs2_addr = core_mini_axi.lookup_symbol(f, "input2_buffer")
+      outputs_addr = core_mini_axi.lookup_symbol(f, "output_buffer")
 
     input1_data = np.arange(8, dtype=np.uint32)
     input2_data = 8994 * np.ones(8, dtype=np.uint32)

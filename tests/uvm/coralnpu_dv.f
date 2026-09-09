@@ -28,8 +28,12 @@
 +incdir+./env
 +incdir+./tests
 +incdir+./tb
++incdir+../../
 
 // --- Source Files ---
+
+// Backdoor DPI
+../../hdl/verilog/sram_backdoor.cc
 
 // Interfaces
 ./common/coralnpu_axi_master/coralnpu_axi_master_if.sv
@@ -38,6 +42,7 @@
 ./common/cosim/coralnpu_cosim_dpi_if.sv
 
 // UVM Packages (in dependency order)
+./common/memory_map_pkg.sv
 ./common/transaction_item/transaction_item_pkg.sv
 ./common/coralnpu_axi_master/coralnpu_axi_master_agent_pkg.sv
 ./common/coralnpu_axi_slave/coralnpu_axi_slave_agent_pkg.sv

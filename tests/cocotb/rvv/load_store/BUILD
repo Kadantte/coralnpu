@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("//rules:coralnpu_v2.bzl", "coralnpu_v2_binary")
+load("//rules:coralnpu_v2.bzl", "collect_coralnpu_elfs", "coralnpu_v2_binary")
 load("//rules:utils.bzl", "template_rule")
 
 package(default_visibility = ["//visibility:public"])
@@ -25,6 +25,12 @@ template_rule(
         },
         "load_store_whole_register": {
             "srcs": ["load_store_whole_register.cc"],
+        },
+        "whole_reg_repro": {
+            "srcs": ["whole_reg_repro.cc"],
+        },
+        "load_unit_ff": {
+            "srcs": ["load_unit_ff.cc"],
         },
         "load_unit_masked": {
             "srcs": ["load_unit_masked.cc"],
@@ -62,6 +68,12 @@ template_rule(
         "load16_segment2_stride6_m1": {
             "srcs": ["load16_segment2_stride6_m1.cc"],
         },
+        "load8_stride0_m1": {
+            "srcs": ["load8_stride0_m1.cc"],
+        },
+        "load8_stride0strict_m1": {
+            "srcs": ["load8_stride0strict_m1.cc"],
+        },
         "load8_stride2_m1": {
             "srcs": ["load8_stride2_m1.cc"],
         },
@@ -70,6 +82,12 @@ template_rule(
         },
         "load8_stride2_mf4": {
             "srcs": ["load8_stride2_mf4.cc"],
+        },
+        "lsu_fault_cases": {
+            "srcs": ["lsu_fault_cases.cc"],
+        },
+        "load_store8_fault": {
+            "srcs": ["load_store8_fault.cc"],
         },
         "load_store8_test": {
             "srcs": ["load_store8_test.cc"],
@@ -182,57 +200,65 @@ template_rule(
 filegroup(
     name = "rvv_load_store_tests",
     srcs = [
-        ":load_store_bits.elf",
-        ":load_store_whole_register.elf",
-        ":load_unit_masked.elf",
-        ":load_unit_vtype.elf",
-        ":load_stride_vtype.elf",
-        ":load8_index8.elf",
-        ":load8_index8_seg.elf",
+        ":load16_index16_seg.elf",
+        ":load16_index32_seg.elf",
+        ":load16_index8.elf",
+        ":load16_index8_seg.elf",
+        ":load16_seg_unit.elf",
+        ":load16_segment2_stride6_m1.elf",
+        ":load16_stride4_m1.elf",
+        ":load16_stride4_m1_partial.elf",
+        ":load16_stride4_mf2.elf",
+        ":load32_index16_seg.elf",
+        ":load32_index32_seg.elf",
+        ":load32_index8.elf",
+        ":load32_index8_seg.elf",
+        ":load32_seg_unit.elf",
+        ":load32_stride8_m1.elf",
+        ":load32_stride8_m1_partial.elf",
         ":load8_index16.elf",
         ":load8_index16_seg.elf",
         ":load8_index32.elf",
         ":load8_index32_seg.elf",
+        ":load8_index8.elf",
+        ":load8_index8_seg.elf",
         ":load8_seg_unit.elf",
         ":load8_segment2_stride6_m1.elf",
-        ":load16_segment2_stride6_m1.elf",
+        ":load8_stride0_m1.elf",
+        ":load8_stride0strict_m1.elf",
         ":load8_stride2_m1.elf",
         ":load8_stride2_m1_partial.elf",
         ":load8_stride2_mf4.elf",
-        ":load_store8_test.elf",
-        ":load_store8_unit_m2.elf",
         ":load_store16_unit_m2.elf",
         ":load_store32_unit_m2.elf",
-        ":load16_index8.elf",
-        ":load16_index8_seg.elf",
-        ":load16_index16_seg.elf",
-        ":load16_index32_seg.elf",
-        ":load16_seg_unit.elf",
-        ":load16_stride4_m1.elf",
-        ":load16_stride4_m1_partial.elf",
-        ":load16_stride4_mf2.elf",
-        ":load32_index8.elf",
-        ":load32_index8_seg.elf",
-        ":load32_index16_seg.elf",
-        ":load32_index32_seg.elf",
-        ":load32_seg_unit.elf",
-        ":load32_stride8_m1.elf",
-        ":load32_stride8_m1_partial.elf",
-        ":store8_index8.elf",
-        ":store8_index8_seg.elf",
-        ":store8_index16.elf",
-        ":store8_index32.elf",
-        ":store16_index8.elf",
+        ":load_store8_fault.elf",
+        ":load_store8_test.elf",
+        ":load_store8_unit_m2.elf",
+        ":load_store_bits.elf",
+        ":load_store_whole_register.elf",
+        ":load_stride_vtype.elf",
+        ":load_unit_ff.elf",
+        ":load_unit_masked.elf",
+        ":load_unit_vtype.elf",
+        ":lsu_fault_cases.elf",
         ":store16_index16.elf",
         ":store16_index32.elf",
-        ":store32_index8.elf",
+        ":store16_index8.elf",
+        ":store16_seg_unit",
         ":store32_index16.elf",
         ":store32_index32.elf",
-        ":store8_seg_unit",
-        ":store16_seg_unit",
+        ":store32_index8.elf",
         ":store32_seg_unit",
+        ":store8_index16.elf",
+        ":store8_index32.elf",
+        ":store8_index8.elf",
+        ":store8_index8_seg.elf",
+        ":store8_seg_unit",
+        ":store_strided_vtype.elf",
         ":store_unit_masked.elf",
         ":store_unit_vtype.elf",
-        ":store_strided_vtype.elf",
+        ":whole_reg_repro.elf",
     ],
 )
+
+collect_coralnpu_elfs()
